@@ -16,6 +16,7 @@ import time
 import unittest
 
 from test_hub import make_fixture, PROJECT, RENAMER
+from tests.terminal_helpers import wait_for_exit
 
 RUNNER = """
 import sys
@@ -85,7 +86,7 @@ class TerminalJourneyTests(unittest.TestCase):
                 wait_until(lambda: (home / "commands.jsonl").read_text().count('"daemon", "start"') == 2)
                 wait_until(lambda: b"account-5@example.org" in transcript)
                 os.write(master, b"q")
-                process.wait(timeout=5)
+                wait_for_exit(process, master)
                 self.assertEqual(process.returncode, 0)
                 with sqlite3.connect(home / "state_5.sqlite") as db:
                     self.assertEqual(db.execute("SELECT name FROM threads WHERE id='thread-1'").fetchone()[0], "Original thread 1")
@@ -96,7 +97,7 @@ class TerminalJourneyTests(unittest.TestCase):
             finally:
                 if process.poll() is None:
                     os.killpg(process.pid, signal.SIGTERM)
-                    process.wait(timeout=5)
+                    wait_for_exit(process, master)
                 os.close(master)
 
     def test_device_login_ctrl_c_returns_to_usable_tui_without_restart(self):
@@ -140,12 +141,12 @@ class TerminalJourneyTests(unittest.TestCase):
                 os.write(master, b"\x1bOC")
                 wait_for(b"Original thread 0")
                 os.write(master, b"q")
-                process.wait(timeout=5)
+                wait_for_exit(process, master)
                 self.assertEqual(process.returncode, 0)
             finally:
                 if process.poll() is None:
                     os.killpg(process.pid, signal.SIGTERM)
-                    process.wait(timeout=5)
+                    wait_for_exit(process, master)
                 os.close(master)
 
 

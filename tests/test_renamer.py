@@ -14,6 +14,7 @@ import time
 import unittest
 
 from codex_renamer import AppServer, CodexError, RpcError
+from tests.terminal_helpers import wait_for_exit
 
 try:
     import fcntl
@@ -380,7 +381,7 @@ class TerminalTests(unittest.TestCase):
     def tearDown(self):
         if self.process.poll() is None:
             self.process.terminate()
-        self.process.wait(timeout=5)
+        wait_for_exit(self.process, self.master)
         os.close(self.master)
         self.directory.cleanup()
 
@@ -450,7 +451,7 @@ class TerminalTests(unittest.TestCase):
         self.wait_editor_closed()
         self.assertEqual(len(self.mutations()), 1)
         self.send("q")
-        self.assertEqual(self.process.wait(timeout=5), 0)
+        self.assertEqual(wait_for_exit(self.process, self.master), 0)
 
     def test_search_selects_correct_thread_and_refresh_keeps_it(self):
         self.send("/")
@@ -516,7 +517,7 @@ class TerminalTests(unittest.TestCase):
         self.drain(0.2)
         self.assertEqual(self.mutations(), [])
         self.send("q")
-        self.assertEqual(self.process.wait(timeout=5), 0)
+        self.assertEqual(wait_for_exit(self.process, self.master), 0)
 
 
 if __name__ == "__main__":

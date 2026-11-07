@@ -54,8 +54,10 @@ def make_fixture(home):
 import base64,json,os,pathlib,sys
 home=pathlib.Path(os.environ['CODEX_HOME'])
 with (home/'commands.jsonl').open('a') as f: f.write(json.dumps(sys.argv[1:])+'\\n')
+def save_registry(path,record):
+ temporary=path.with_suffix('.tmp'); temporary.write_text(json.dumps(record)); temporary.replace(path)
 if sys.argv[1]=='switch':
- p=home/'accounts/registry.json'; r=json.loads(p.read_text()); r['active_account_key']=sys.argv[2]; p.write_text(json.dumps(r))
+ p=home/'accounts/registry.json'; r=json.loads(p.read_text()); r['active_account_key']=sys.argv[2]; save_registry(p,r)
  print(json.dumps({'switched_to':{'account_key':sys.argv[2]}}))
 elif sys.argv[1]=='login':
  print('FAKE LOGIN READY',flush=True)
@@ -64,7 +66,7 @@ elif sys.argv[1]=='login':
  if answer=='fail': sys.exit(1)
  p=home/'accounts/registry.json'; r=json.loads(p.read_text()); i=len(r['accounts'])
  account=dict(r['accounts'][0]); account.update(account_key=f'user-{i}::workspace',email=f'account-{i+1}@example.org')
- r['accounts'].append(account); r['active_account_key']=account['account_key']; p.write_text(json.dumps(r))
+ r['accounts'].append(account); r['active_account_key']=account['account_key']; save_registry(p,r)
  key=base64.urlsafe_b64encode(account['account_key'].encode()).decode().rstrip('=')
  (home/'accounts'/f'{key}.auth.json').write_text(json.dumps({'tokens':{'access_token':f'secret-{i}','account_id':'workspace'}}))
  print('Fake sign-in complete',flush=True)
