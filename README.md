@@ -7,7 +7,7 @@
 Switch accounts, watch your quotas, catch expiring resets, and rename threads.
 
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)
-![Linux / WSL](https://img.shields.io/badge/Linux_%2F_WSL-supported-7dd3fc?style=flat-square)
+![macOS / Linux / WSL](https://img.shields.io/badge/macOS_%2F_Linux_%2F_WSL-supported-7dd3fc?style=flat-square)
 ![No Python runtime dependencies](https://img.shields.io/badge/runtime_dependencies-zero-86efac?style=flat-square)
 [![MIT license](https://img.shields.io/badge/license-MIT-c4b5fd?style=flat-square)](LICENSE)
 
@@ -26,7 +26,7 @@ Saved limits appear immediately; live data loads in the background. Four account
 
 ## 🚀 Quick start
 
-You need **Python 3.10+ with `curses`**, the [Codex CLI](https://github.com/openai/codex), and [Codex-Auth](https://github.com/Loongphy/codex-auth) on your `PATH`. Linux and WSL are the tested platforms. The thread renamer is bundled.
+You need **Python 3.10+ with `curses`**, the [Codex CLI](https://github.com/openai/codex), and [Codex-Auth](https://github.com/Loongphy/codex-auth) on your `PATH`. Tested on Linux/WSL and macOS, including automated terminal tests. The thread renamer is bundled.
 
 ### Homebrew
 
