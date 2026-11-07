@@ -2,6 +2,7 @@ name: Checks
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -34,3 +35,29 @@ jobs:
           cd "$(mktemp -d)"
           codex-accountdeck --version
           codex-accountdeck --help
+      - uses: actions/setup-node@v7
+        if: matrix.python == '3.12'
+        with:
+          node-version: "24"
+      - name: Pack and install npm distribution without lifecycle scripts
+        if: matrix.python == '3.12'
+        run: |
+          mkdir -p "$RUNNER_TEMP/accountdeck-pack"
+          npm pack --pack-destination "$RUNNER_TEMP/accountdeck-pack"
+          npm install --global --prefix "$RUNNER_TEMP/accountdeck-npm" "$RUNNER_TEMP"/accountdeck-pack/*.tgz --ignore-scripts --no-audit --no-fund
+          cd "$(mktemp -d)"
+          "$RUNNER_TEMP/accountdeck-npm/bin/codex-accountdeck" --version
+          "$RUNNER_TEMP/accountdeck-npm/bin/codex-accountdeck" --help
+
+  macos:
+    runs-on: macos-latest
+    env:
+      TERM: xterm-256color
+      LC_ALL: en_US.UTF-8
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Run isolated unit and terminal tests
+        run: python -m unittest discover -v

@@ -106,7 +106,7 @@ class AccountSwitchTests(unittest.TestCase):
             run.return_value.stdout = json.dumps({"switched_to": {"account_key": "later"}})
             self.assertEqual(app.choose_account(accounts, Path("/tmp/test-codex-home")), 0)
         self.assertEqual(run.call_args.args[0], ["codex-auth", "switch", "later", "--json"])
-        self.assertEqual(run.call_args.kwargs["env"]["CODEX_HOME"], "/tmp/test-codex-home")
+        self.assertEqual(run.call_args.kwargs["env"]["CODEX_HOME"], str(Path("/tmp/test-codex-home").resolve()))
         self.assertTrue(run.call_args.kwargs["capture_output"])
 
     def test_cancel_never_runs_codex_auth(self):

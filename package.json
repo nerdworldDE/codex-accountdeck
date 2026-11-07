@@ -1,0 +1,31 @@
+{
+  "name": "codex-accountdeck",
+  "version": "1.2.0",
+  "description": "A terminal dashboard for Codex accounts, quotas, reset credits and thread names",
+  "license": "MIT",
+  "homepage": "https://github.com/nerdworldDE/codex-accountdeck#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nerdworldDE/codex-accountdeck.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nerdworldDE/codex-accountdeck/issues"
+  },
+  "keywords": ["codex", "tui", "accounts", "quotas", "terminal"],
+  "os": ["linux", "darwin"],
+  "bin": {
+    "codex-accountdeck": "codex-accountdeck"
+  },
+  "files": [
+    "codex-accountdeck",
+    "codex_hub.py",
+    "hub_accounts.py",
+    "codex_resets.py",
+    "codex_renamer.py",
+    "codex_colors.py",
+    "docs/preview.svg"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

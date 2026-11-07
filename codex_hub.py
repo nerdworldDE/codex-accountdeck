@@ -20,7 +20,7 @@ from hub_accounts import (AccountService, CommandError, Controller, clean, expir
                           short_time, usable_credits)
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 UTC = timezone.utc
 
 

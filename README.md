@@ -28,32 +28,52 @@ Saved limits appear immediately; live data loads in the background. Four account
 
 You need **Python 3.10+ with `curses`**, the [Codex CLI](https://github.com/openai/codex), and [Codex-Auth](https://github.com/Loongphy/codex-auth) on your `PATH`. Linux and WSL are the tested platforms. The thread renamer is bundled.
 
-While this repository is private, sign in to GitHub first (`gh auth login` if needed). Then clone and run:
+### Homebrew
 
 ```bash
-gh repo clone nerdworldDE/codex-accountdeck
+brew install nerdworldDE/tap/codex-accountdeck
+codex-accountdeck
+```
+
+Homebrew installs a compatible Python automatically. You still need Codex CLI and Codex-Auth.
+
+### npm · directly from GitHub
+
+```bash
+npm install -g git+https://github.com/nerdworldDE/codex-accountdeck.git
+codex-accountdeck
+```
+
+This installs the bundled Python application, with no Node runtime dependencies or install scripts. Python 3.10+ with `curses` must already be available as `python3`. The package has not been published to the npm registry; use the GitHub URL above.
+
+### Python · pipx / uv
+
+```bash
+pipx install git+https://github.com/nerdworldDE/codex-accountdeck.git
+# Or: uv tool install git+https://github.com/nerdworldDE/codex-accountdeck.git
+codex-accountdeck
+```
+
+<details>
+<summary>Run directly from source, without installing a Python package</summary>
+
+```bash
+git clone https://github.com/nerdworldDE/codex-accountdeck.git
 cd codex-accountdeck
 ./codex-accountdeck
 ```
 
-This runs directly from the checkout: no sibling projects or Python package installation are needed. If the Codex command-line tools are not installed yet:
+No sibling projects are needed. From this checkout, `pipx install .` / `uv tool install .` also works. `python3 install_hub.py` installs a launcher in `~/.local/bin`; keep the checkout in place and ensure that directory is on your `PATH`.
+
+</details>
+
+If the Codex command-line tools are not installed yet:
 
 ```bash
 npm install -g @openai/codex @loongphy/codex-auth
 ```
 
 No accounts yet? Press **`l`** to sign in through your browser, or **`L`** for a device code. AccountDeck returns to the overview after login and restarts the background service.
-
-Want the command available everywhere? Choose either installer. GitHub's credential helper lets it access the private repository without putting a token in the URL:
-
-```bash
-gh auth setup-git
-pipx install git+https://github.com/nerdworldDE/codex-accountdeck.git
-# Or: uv tool install git+https://github.com/nerdworldDE/codex-accountdeck.git
-codex-accountdeck
-```
-
-From an existing checkout, `pipx install .` / `uv tool install .` also works. Without either tool, `python3 install_hub.py` installs a launcher in `~/.local/bin`; keep the checkout in place and ensure that directory is on your `PATH`.
 
 ## ⌨️ Make yourself at home
 

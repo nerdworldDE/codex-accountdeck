@@ -136,7 +136,7 @@ class AccountService:
         request = urllib.request.Request(BASE_URL + endpoint, headers={
             "Authorization": "Bearer " + tokens["access_token"],
             "ChatGPT-Account-Id": tokens["account_id"],
-            "Accept": "application/json", "User-Agent": "codex-accountdeck/1.1",
+            "Accept": "application/json", "User-Agent": "codex-accountdeck/1.2",
         })
         with urllib.request.build_opener(NoRedirect).open(request, timeout=self.timeout) as response:
             return json.load(response)

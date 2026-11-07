@@ -36,6 +36,17 @@ These commands produce a wheel and source distribution under `dist/`. The distri
 
 Building does not publish anything. The GitHub workflow tests Python 3.10, 3.12 and 3.14 on Linux, then builds and smoke-tests a wheel. It contains no upload, release, or publishing step.
 
+The workflow also checks macOS, and packs/installs the npm distribution without lifecycle scripts. Python and npm versions must match. The npm entry point uses Python directly, so curses and interactive login retain their normal terminal and signal behavior.
+
+```bash
+npm pack
+npm install --global ./codex-accountdeck-1.2.0.tgz
+```
+
+The npm package uses an explicit file allowlist: the launcher, the five Python modules, the demo SVG, and npm's standard metadata/readme/license files. It does not include tests, local settings, credentials, or caches. Installing from GitHub does not require npm publisher credentials. Publishing to the npm registry is a separate maintainer action (`npm login`, then `npm publish`).
+
+Homebrew is distributed through [nerdworldDE/homebrew-tap](https://github.com/nerdworldDE/homebrew-tap). Its formula pins a release archive and SHA-256 checksum and declares the Python dependency. Future releases need an updated formula URL, version, and checksum.
+
 ## Terminal preview
 
 ```bash

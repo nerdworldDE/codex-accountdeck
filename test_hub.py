@@ -193,7 +193,7 @@ class AccountTests(unittest.TestCase):
                 self.assertTrue(controller.login(device_auth))
                 expected = ["codex-auth", "login"] + (["--device-auth"] if device_auth else [])
                 self.assertEqual(spawn.call_args.args[0], expected)
-                self.assertEqual(spawn.call_args.kwargs["env"]["CODEX_HOME"], str(self.home))
+                self.assertEqual(spawn.call_args.kwargs["env"]["CODEX_HOME"], str(self.home.resolve()))
                 for stream in ("stdin", "stdout", "stderr"):
                     self.assertNotIn(stream, spawn.call_args.kwargs)
 
