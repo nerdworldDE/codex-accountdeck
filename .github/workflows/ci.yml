@@ -1,0 +1,36 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12", "3.14"]
+    env:
+      TERM: xterm-256color
+      LC_ALL: C.UTF-8
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run isolated unit and terminal tests
+        run: python -m unittest discover -v
+      - name: Build and smoke-test the wheel
+        if: matrix.python == '3.12'
+        run: |
+          python -m pip install build
+          python -m build
+          python -m pip install --no-deps dist/*.whl
+          cd "$(mktemp -d)"
+          codex-accountdeck --version
+          codex-accountdeck --help

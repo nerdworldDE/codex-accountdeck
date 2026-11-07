@@ -1,0 +1,12 @@
+include LICENSE README.md .gitignore .gitattributes
+include codex-accountdeck codex-hub codex-resets-terminal install_hub.py
+include test_*.py
+recursive-include tests *.py *.json
+recursive-include docs *.md *.svg
+recursive-include scripts *.py
+recursive-include .github *.yml
+global-exclude __pycache__ *.py[cod] auth.json* *.auth.json* registry.json* *.sqlite*
+prune .agents
+prune .codex
+prune .aws
+prune .local-notes

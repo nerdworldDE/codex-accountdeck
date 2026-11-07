@@ -1,0 +1,155 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="758" viewBox="0 0 1000 758" role="img" aria-labelledby="title desc">
+<title id="title">Codex AccountDeck terminal preview</title>
+<desc id="desc">Four fictional accounts, stacked quota bars on the left, reset expiry on the right, and keyboard shortcuts below.</desc>
+<rect x="1" y="1" width="998" height="756" rx="14" fill="#10151e" stroke="#283448"/>
+<circle cx="23" cy="22" r="5" fill="#fc8181"/>
+<circle cx="41" cy="22" r="5" fill="#fdba74"/>
+<circle cx="59" cy="22" r="5" fill="#86efac"/>
+<text x="500" y="27" text-anchor="middle" fill="#94a3b8" font-family="monospace" font-size="12">codex-accountdeck · fictional demo accounts</text>
+<g font-family="DejaVu Sans Mono, monospace" font-size="13" xml:space="preserve">
+<text x="36" y="62" fill="#7dd3fc" font-weight="bold" textLength="152" lengthAdjust="spacing">◈ CODEX ACCOUNTDECK</text>
+<text x="220" y="62" fill="#94a3b8" textLength="224" lengthAdjust="spacing">YOUR ACCOUNTS. ONE TERMINAL.</text>
+<text x="836" y="62" fill="#86efac" textLength="120" lengthAdjust="spacing">● Server online</text>
+<rect x="36" y="87" width="80" height="20" fill="#7dd3fc"/>
+<text x="36" y="102" fill="#10151e" font-weight="bold" textLength="80" lengthAdjust="spacing"> Accounts </text>
+<text x="156" y="102" fill="#7dd3fc" font-weight="bold" textLength="72" lengthAdjust="spacing"> Threads </text>
+<text x="268" y="102" fill="#94a3b8" textLength="160" lengthAdjust="spacing">← / → to change view</text>
+<text x="36" y="142" fill="#e2e8f0" font-weight="bold" textLength="480" lengthAdjust="spacing">4 ACCOUNTS   /   8 SAVED RESETS   /   NEXT EXPIRY IN 12H 00M</text>
+<text x="36" y="162" fill="#7dd3fc" textLength="8" lengthAdjust="spacing">╭</text>
+<text x="44" y="162" fill="#7dd3fc" font-weight="bold" textLength="16" lengthAdjust="spacing">› </text>
+<text x="60" y="162" fill="#7dd3fc" textLength="8" lengthAdjust="spacing">─</text>
+<text x="68" y="162" fill="#e2e8f0" font-weight="bold" textLength="144" lengthAdjust="spacing"> work@example.com </text>
+<text x="212" y="162" fill="#7dd3fc" textLength="592" lengthAdjust="spacing">──────────────────────────────────────────────────────────────────────────</text>
+<text x="804" y="162" fill="#86efac" textLength="136" lengthAdjust="spacing"> ● ACTIVE · LIVE </text>
+<text x="940" y="162" fill="#7dd3fc" textLength="24" lengthAdjust="spacing">──╮</text>
+<text x="36" y="182" fill="#7dd3fc" textLength="8" lengthAdjust="spacing">│</text>
+<text x="52" y="182" fill="#94a3b8" textLength="16" lengthAdjust="spacing">5h</text>
+<text x="108" y="182" fill="#86efac" font-weight="bold" textLength="160" lengthAdjust="spacing">━━━━━━━━━━━━━━━━━━━━</text>
+<text x="268" y="182" fill="#475569" textLength="32" lengthAdjust="spacing">━━━━</text>
+<text x="308" y="182" fill="#86efac" textLength="32" lengthAdjust="spacing"> 82%</text>
+<text x="396" y="182" fill="#94a3b8" textLength="64" lengthAdjust="spacing">↻ 3h 24m</text>
+<text x="492" y="182" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="508" y="182" fill="#e2e8f0" font-weight="bold" textLength="72" lengthAdjust="spacing">Resets  2</text>
+<text x="956" y="182" fill="#7dd3fc" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="202" fill="#7dd3fc" textLength="8" lengthAdjust="spacing">│</text>
+<text x="52" y="202" fill="#94a3b8" textLength="48" lengthAdjust="spacing">Weekly</text>
+<text x="108" y="202" fill="#86efac" font-weight="bold" textLength="136" lengthAdjust="spacing">━━━━━━━━━━━━━━━━━</text>
+<text x="244" y="202" fill="#475569" textLength="56" lengthAdjust="spacing">━━━━━━━</text>
+<text x="308" y="202" fill="#86efac" textLength="32" lengthAdjust="spacing"> 70%</text>
+<text x="396" y="202" fill="#94a3b8" textLength="56" lengthAdjust="spacing">↻ 3d 5h</text>
+<text x="492" y="202" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="508" y="202" fill="#fc8181" textLength="232" lengthAdjust="spacing">↺ next 12h 00m (08 Nov 01:00)</text>
+<text x="956" y="202" fill="#7dd3fc" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="222" fill="#7dd3fc" textLength="8" lengthAdjust="spacing">│</text>
+<text x="52" y="222" fill="#94a3b8" textLength="264" lengthAdjust="spacing">Business  ·  limits checked 13:00</text>
+<text x="492" y="222" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="508" y="222" fill="#86efac" textLength="184" lengthAdjust="spacing">↺ 12d 0h (19 Nov 13:00)</text>
+<text x="956" y="222" fill="#7dd3fc" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="242" fill="#7dd3fc" textLength="8" lengthAdjust="spacing">│</text>
+<text x="492" y="242" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="956" y="242" fill="#7dd3fc" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="262" fill="#7dd3fc" textLength="928" lengthAdjust="spacing">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+<text x="36" y="282" fill="#475569" textLength="8" lengthAdjust="spacing">╭</text>
+<text x="60" y="282" fill="#475569" textLength="8" lengthAdjust="spacing">─</text>
+<text x="68" y="282" fill="#e2e8f0" textLength="176" lengthAdjust="spacing"> personal@example.com </text>
+<text x="244" y="282" fill="#475569" textLength="648" lengthAdjust="spacing">─────────────────────────────────────────────────────────────────────────────────</text>
+<text x="892" y="282" fill="#86efac" textLength="48" lengthAdjust="spacing"> LIVE </text>
+<text x="940" y="282" fill="#475569" textLength="24" lengthAdjust="spacing">──╮</text>
+<text x="36" y="302" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="52" y="302" fill="#94a3b8" textLength="16" lengthAdjust="spacing">5h</text>
+<text x="108" y="302" fill="#86efac" font-weight="bold" textLength="112" lengthAdjust="spacing">━━━━━━━━━━━━━━</text>
+<text x="220" y="302" fill="#475569" textLength="80" lengthAdjust="spacing">━━━━━━━━━━</text>
+<text x="308" y="302" fill="#86efac" textLength="32" lengthAdjust="spacing"> 57%</text>
+<text x="396" y="302" fill="#94a3b8" textLength="64" lengthAdjust="spacing">↻ 3h 24m</text>
+<text x="492" y="302" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="508" y="302" fill="#e2e8f0" font-weight="bold" textLength="72" lengthAdjust="spacing">Resets  2</text>
+<text x="956" y="302" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="322" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="52" y="322" fill="#94a3b8" textLength="48" lengthAdjust="spacing">Weekly</text>
+<text x="108" y="322" fill="#86efac" font-weight="bold" textLength="96" lengthAdjust="spacing">━━━━━━━━━━━━</text>
+<text x="204" y="322" fill="#475569" textLength="96" lengthAdjust="spacing">━━━━━━━━━━━━</text>
+<text x="308" y="322" fill="#86efac" textLength="32" lengthAdjust="spacing"> 50%</text>
+<text x="396" y="322" fill="#94a3b8" textLength="56" lengthAdjust="spacing">↻ 3d 5h</text>
+<text x="492" y="322" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="508" y="322" fill="#fdba74" textLength="224" lengthAdjust="spacing">↺ next 1d 12h (09 Nov 01:00)</text>
+<text x="956" y="322" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="342" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="52" y="342" fill="#94a3b8" textLength="264" lengthAdjust="spacing">Business  ·  limits checked 13:00</text>
+<text x="492" y="342" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="508" y="342" fill="#86efac" textLength="184" lengthAdjust="spacing">↺ 13d 0h (20 Nov 13:00)</text>
+<text x="956" y="342" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="362" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="492" y="362" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="956" y="362" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="382" fill="#475569" textLength="928" lengthAdjust="spacing">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+<text x="36" y="402" fill="#475569" textLength="8" lengthAdjust="spacing">╭</text>
+<text x="60" y="402" fill="#475569" textLength="8" lengthAdjust="spacing">─</text>
+<text x="68" y="402" fill="#e2e8f0" textLength="160" lengthAdjust="spacing"> client@example.com </text>
+<text x="228" y="402" fill="#475569" textLength="664" lengthAdjust="spacing">───────────────────────────────────────────────────────────────────────────────────</text>
+<text x="892" y="402" fill="#86efac" textLength="48" lengthAdjust="spacing"> LIVE </text>
+<text x="940" y="402" fill="#475569" textLength="24" lengthAdjust="spacing">──╮</text>
+<text x="36" y="422" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="52" y="422" fill="#94a3b8" textLength="16" lengthAdjust="spacing">5h</text>
+<text x="108" y="422" fill="#86efac" font-weight="bold" textLength="64" lengthAdjust="spacing">━━━━━━━━</text>
+<text x="172" y="422" fill="#475569" textLength="128" lengthAdjust="spacing">━━━━━━━━━━━━━━━━</text>
+<text x="308" y="422" fill="#86efac" textLength="32" lengthAdjust="spacing"> 32%</text>
+<text x="396" y="422" fill="#94a3b8" textLength="64" lengthAdjust="spacing">↻ 3h 24m</text>
+<text x="492" y="422" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="508" y="422" fill="#e2e8f0" font-weight="bold" textLength="72" lengthAdjust="spacing">Resets  2</text>
+<text x="956" y="422" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="442" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="52" y="442" fill="#94a3b8" textLength="48" lengthAdjust="spacing">Weekly</text>
+<text x="108" y="442" fill="#fdba74" font-weight="bold" textLength="56" lengthAdjust="spacing">━━━━━━━</text>
+<text x="164" y="442" fill="#475569" textLength="136" lengthAdjust="spacing">━━━━━━━━━━━━━━━━━</text>
+<text x="308" y="442" fill="#fdba74" textLength="32" lengthAdjust="spacing"> 30%</text>
+<text x="396" y="442" fill="#94a3b8" textLength="56" lengthAdjust="spacing">↻ 3d 5h</text>
+<text x="492" y="442" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="508" y="442" fill="#fdba74" textLength="224" lengthAdjust="spacing">↺ next 2d 12h (10 Nov 01:00)</text>
+<text x="956" y="442" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="462" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="52" y="462" fill="#94a3b8" textLength="264" lengthAdjust="spacing">Business  ·  limits checked 13:00</text>
+<text x="492" y="462" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="508" y="462" fill="#86efac" textLength="184" lengthAdjust="spacing">↺ 14d 0h (21 Nov 13:00)</text>
+<text x="956" y="462" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="482" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="492" y="482" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="956" y="482" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="502" fill="#475569" textLength="928" lengthAdjust="spacing">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+<text x="36" y="522" fill="#475569" textLength="8" lengthAdjust="spacing">╭</text>
+<text x="60" y="522" fill="#475569" textLength="8" lengthAdjust="spacing">─</text>
+<text x="68" y="522" fill="#e2e8f0" textLength="136" lengthAdjust="spacing"> lab@example.com </text>
+<text x="204" y="522" fill="#475569" textLength="688" lengthAdjust="spacing">──────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="892" y="522" fill="#86efac" textLength="48" lengthAdjust="spacing"> LIVE </text>
+<text x="940" y="522" fill="#475569" textLength="24" lengthAdjust="spacing">──╮</text>
+<text x="36" y="542" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="52" y="542" fill="#94a3b8" textLength="16" lengthAdjust="spacing">5h</text>
+<text x="108" y="542" fill="#fc8181" font-weight="bold" textLength="16" lengthAdjust="spacing">━━</text>
+<text x="124" y="542" fill="#475569" textLength="176" lengthAdjust="spacing">━━━━━━━━━━━━━━━━━━━━━━</text>
+<text x="308" y="542" fill="#fc8181" textLength="32" lengthAdjust="spacing">  7%</text>
+<text x="396" y="542" fill="#94a3b8" textLength="64" lengthAdjust="spacing">↻ 3h 24m</text>
+<text x="492" y="542" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="508" y="542" fill="#e2e8f0" font-weight="bold" textLength="72" lengthAdjust="spacing">Resets  2</text>
+<text x="956" y="542" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="562" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="52" y="562" fill="#94a3b8" textLength="48" lengthAdjust="spacing">Weekly</text>
+<text x="108" y="562" fill="#fc8181" font-weight="bold" textLength="16" lengthAdjust="spacing">━━</text>
+<text x="124" y="562" fill="#475569" textLength="176" lengthAdjust="spacing">━━━━━━━━━━━━━━━━━━━━━━</text>
+<text x="308" y="562" fill="#fc8181" textLength="32" lengthAdjust="spacing"> 10%</text>
+<text x="396" y="562" fill="#94a3b8" textLength="56" lengthAdjust="spacing">↻ 3d 5h</text>
+<text x="492" y="562" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="508" y="562" fill="#fdba74" textLength="224" lengthAdjust="spacing">↺ next 3d 12h (11 Nov 01:00)</text>
+<text x="956" y="562" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="582" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="52" y="582" fill="#94a3b8" textLength="264" lengthAdjust="spacing">Business  ·  limits checked 13:00</text>
+<text x="492" y="582" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="508" y="582" fill="#86efac" textLength="184" lengthAdjust="spacing">↺ 15d 0h (22 Nov 13:00)</text>
+<text x="956" y="582" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="602" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="492" y="602" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="956" y="602" fill="#475569" textLength="8" lengthAdjust="spacing">│</text>
+<text x="36" y="622" fill="#475569" textLength="928" lengthAdjust="spacing">╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+<text x="36" y="682" fill="#475569" textLength="928" lengthAdjust="spacing">────────────────────────────────────────────────────────────────────────────────────────────────────────────────────</text>
+<text x="36" y="702" fill="#94a3b8" textLength="832" lengthAdjust="spacing">↑↓ Select   Enter Switch+restart   → Threads   l Login   L Device login   r Refresh   d Restart   q Quit</text>
+<text x="36" y="722" fill="#7dd3fc" textLength="448" lengthAdjust="spacing">All accounts up to date · limits show remaining capacity</text>
+</g>
+</svg>
