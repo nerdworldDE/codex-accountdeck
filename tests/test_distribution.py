@@ -23,8 +23,8 @@ class DistributionTests(unittest.TestCase):
 
     def test_no_install_hooks_and_only_app_files_are_packaged(self):
         self.assertEqual(set(self.package["files"]), {
-            "codex-accountdeck", "codex_hub.py", "hub_accounts.py", "codex_resets.py",
-            "codex_renamer.py", "codex_colors.py", "docs/preview.svg",
+            "codex-accountdeck", "codex_hub.py", "hub_accounts.py", "hub_threads.py", "hub_resumer.py", "hub_demo.py", "codex_resets.py",
+            "codex_renamer.py", "codex_colors.py", "docs/screenshots/accounts.png", "docs/screenshots/threads.png",
         })
         scripts = self.package.get("scripts", {})
         for lifecycle in ("preinstall", "install", "postinstall", "prepare"):

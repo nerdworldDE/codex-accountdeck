@@ -9,7 +9,7 @@ The interactive app uses only Python's standard library. Both the thread-renamer
 python3 -m unittest discover -v
 ```
 
-The normal suite never signs into real accounts, restarts a real daemon, or calls a model. It uses temporary data and fake command-line programs. Terminal tests require a POSIX pseudoterminal and `curses`.
+The normal suite never signs into real accounts, restarts a real daemon, or calls a model. The two-tab interface and screenshot demo have full PTY journeys, including live search, Ctrl+R rename, filter choices and resume without switching accounts; demo isolation is also checked with real command/service entry points blocked. It uses temporary data and fake command-line programs. Terminal tests require a POSIX pseudoterminal and `curses`.
 
 The bundled renamer also has an opt-in test against the installed Codex CLI. It uses a separate temporary `CODEX_HOME` and does not make inference requests:
 
@@ -43,23 +43,27 @@ npm pack
 npm install --global ./codex-accountdeck-1.2.0.tgz
 ```
 
-The npm package uses an explicit file allowlist: the launcher, the five Python modules, the demo SVG, and npm's standard metadata/readme/license files. It does not include tests, local settings, credentials, or caches. Installing from GitHub does not require npm publisher credentials. Publishing to the npm registry is a separate maintainer action (`npm login`, then `npm publish`).
+The npm package uses an explicit file allowlist: the launcher, the eight Python modules, the two README screenshots, and npm's standard metadata/readme/license files. It does not include tests, local settings, credentials, or caches. Installing from GitHub does not require npm publisher credentials. Publishing to the npm registry is a separate maintainer action (`npm login`, then `npm publish`).
 
 Homebrew is distributed through [nerdworldDE/homebrew-tap](https://github.com/nerdworldDE/homebrew-tap). Its formula pins a release archive and SHA-256 checksum and declares the Python dependency. Future releases need an updated formula URL, version, and checksum.
 
-## Terminal preview
+## Screenshots
 
 ```bash
-python3 scripts/render_preview.py
+./codex-accountdeck --demo
+./codex-accountdeck --demo --threads
 ```
 
-This renders the actual account-card layout into `docs/preview.svg`, using a fixed clock and fictional accounts. It reads no real credentials, thread names, or account data.
+The README uses actual terminal captures in `docs/screenshots/accounts.png` and `docs/screenshots/threads.png`. To refresh them, start demo mode and capture the Accounts and Threads tabs. Keep the DEMO badge visible and use fictional data. The former SVG illustration and its generator have been removed.
 
 ## Source map
 
 | File | Responsibility |
 | --- | --- |
-| `codex_hub.py` | AccountDeck interface and keyboard handling |
+| `codex_hub.py` | AccountDeck interface, keyboard handling and foreground Codex launch |
+| `hub_threads.py` | Local thread discovery, role-aware cached search, relevance ranking and resume planning |
+| `hub_resumer.py` | Combined Threads table, live search worker, filter panel, columns and sorting |
+| `hub_demo.py` | Disposable fictional accounts/transcripts and simulated actions for `--demo` |
 | `hub_accounts.py` | Account snapshots, read-only usage requests, login/switch/daemon commands |
 | `codex_renamer.py`, `codex_colors.py` | Bundled thread management and colors |
 | `codex_resets.py` | Shared reset parsing and original optional reset utilities |

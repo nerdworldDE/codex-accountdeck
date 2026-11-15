@@ -1,7 +1,7 @@
 {
   "name": "codex-accountdeck",
   "version": "1.2.0",
-  "description": "A terminal dashboard for Codex accounts, quotas, reset credits and thread names",
+  "description": "A terminal dashboard for Codex accounts, quotas and local thread search, rename and resume across accounts",
   "license": "MIT",
   "homepage": "https://github.com/nerdworldDE/codex-accountdeck#readme",
   "repository": {
@@ -20,10 +20,14 @@
     "codex-accountdeck",
     "codex_hub.py",
     "hub_accounts.py",
+    "hub_threads.py",
+    "hub_resumer.py",
+    "hub_demo.py",
     "codex_resets.py",
     "codex_renamer.py",
     "codex_colors.py",
-    "docs/preview.svg"
+    "docs/screenshots/accounts.png",
+    "docs/screenshots/threads.png"
   ],
   "publishConfig": {
     "access": "public"

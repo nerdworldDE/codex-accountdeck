@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "codex-accountdeck"
 dynamic = ["version"]
-description = "A terminal dashboard for Codex accounts, quotas, reset credits and thread names"
+description = "A terminal dashboard for Codex accounts, quotas and local thread search, rename and resume across accounts"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -29,7 +29,7 @@ Repository = "https://github.com/nerdworldDE/codex-accountdeck"
 Issues = "https://github.com/nerdworldDE/codex-accountdeck/issues"
 
 [tool.setuptools]
-py-modules = ["codex_hub", "hub_accounts", "codex_resets", "codex_renamer", "codex_colors"]
+py-modules = ["codex_hub", "hub_accounts", "hub_threads", "hub_resumer", "hub_demo", "codex_resets", "codex_renamer", "codex_colors"]
 
 [tool.setuptools.dynamic]
 version = {attr = "codex_hub.VERSION"}

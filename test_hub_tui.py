@@ -30,7 +30,7 @@ raise SystemExit(main(sys.argv[1:]))
 
 @unittest.skipUnless((RENAMER / "codex_renamer.py").exists(), "Local renamer unavailable")
 class TerminalJourneyTests(unittest.TestCase):
-    def test_rename_tab_navigation_switch_and_login_restart(self):
+    def test_thread_rename_navigation_switch_and_login_restart(self):
         with tempfile.TemporaryDirectory(prefix="codex-hub-tui-") as tmp:
             home = Path(tmp)
             fake = make_fixture(home)
@@ -65,10 +65,11 @@ class TerminalJourneyTests(unittest.TestCase):
                 self.assertNotIn(b"Traceback", transcript)
                 os.write(master, b"\x1bOC")  # right: Threads
                 wait_until(lambda: b"Original thread 0" in transcript)
-                os.write(master, b"\r")
+                os.write(master, b"\x12")  # Ctrl+R
                 wait_until(lambda: b"Rename thread" in transcript)
                 os.write(master, b"Renamed title\x1bODX\r")  # left stays in the editor
                 wait_until(lambda: title() == "Renamed titlXe")
+                wait_until(lambda: b"Renamed: Renamed titlXe" in transcript)
                 os.write(master, b"\x1bOD")  # left: Accounts
                 time.sleep(.12)
                 os.write(master, b"\x1bOB\r")  # down, Enter: second account
@@ -85,7 +86,7 @@ class TerminalJourneyTests(unittest.TestCase):
                 wait_until(lambda: b"Login successful" in transcript)
                 wait_until(lambda: (home / "commands.jsonl").read_text().count('"daemon", "start"') == 2)
                 wait_until(lambda: b"account-5@example.org" in transcript)
-                os.write(master, b"q")
+                os.write(master, b"\x1b[21~")  # F10
                 wait_for_exit(process, master)
                 self.assertEqual(process.returncode, 0)
                 with sqlite3.connect(home / "state_5.sqlite") as db:
@@ -140,7 +141,7 @@ class TerminalJourneyTests(unittest.TestCase):
                 self.assertNotIn(["app-server", "daemon", "start"], calls)
                 os.write(master, b"\x1bOC")
                 wait_for(b"Original thread 0")
-                os.write(master, b"q")
+                os.write(master, b"\x1b[21~")  # F10
                 wait_for_exit(process, master)
                 self.assertEqual(process.returncode, 0)
             finally:

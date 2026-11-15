@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Codex AccountDeck: accounts, quotas, reset credits and thread names in one TUI."""
+"""Codex AccountDeck: accounts, quotas, thread search and resume in one TUI."""
 from __future__ import annotations
 
 import argparse
@@ -10,14 +10,18 @@ import math
 import os
 from pathlib import Path
 from queue import Empty, Queue
+import subprocess
 import sys
 import threading
 import time
+import tempfile
 
 from codex_resets import timestamp
 from hub_accounts import (AccountService, CommandError, Controller, clean, expires_in,
                           merge_local, registry_snapshot, remaining_percent, reset_count,
                           short_time, usable_credits)
+from hub_resumer import ResumerView
+from hub_threads import resume_plan
 
 ROOT = Path(__file__).resolve().parent
 VERSION = "1.2.0"
@@ -35,10 +39,11 @@ def load_renamer(directory):
 class HubApp:
     def __init__(self, args, renamer):
         self.args, self.renamer = args, renamer
+        self.demo = bool(getattr(args, "demo", False))
         self.home = args.codex_home.expanduser().resolve()
         self.accounts = []
         self.index = self.offset = 0
-        self.tab = "threads" if args.renamer else "accounts"
+        self.tab = "threads" if getattr(args, "resumer", False) or args.renamer else "accounts"
         self.messages = Queue()
         self.generation = 0
         self.loading = set()
@@ -51,12 +56,22 @@ class HubApp:
         self.daemon_epoch = 0
         self.status_until = 0.0
         self.closing = threading.Event()
-        self.client = renamer.AppServer(args.codex_bin, self.home)
+        if self.demo:
+            from hub_demo import demo_client
+            self.client = demo_client(renamer, args.codex_bin, self.home)
+        else:
+            self.client = renamer.AppServer(args.codex_bin, self.home)
         self.threads = renamer.RenamerApp(self.client, args.limit)
-        self.threads_loaded = False
-        self.service = AccountService(self.home)
-        self.controller = Controller(self.home, args.codex_bin, args.auth_bin,
-                                     lambda text: self.messages.put(("progress", text)))
+        self.resumer = ResumerView(self.home, renamer, str(getattr(args, "directory", "") or ""))
+        self.resumer_loaded = False
+        emit = lambda text: self.messages.put(("progress", text))
+        if self.demo:
+            from hub_demo import DemoAccountService, DemoController
+            self.service = DemoAccountService(self.home)
+            self.controller = DemoController(self.home, emit)
+        else:
+            self.service = AccountService(self.home)
+            self.controller = Controller(self.home, args.codex_bin, args.auth_bin, emit)
         self.styles = {}
         self.screen = None
 
@@ -168,6 +183,15 @@ class HubApp:
         if self.args.offline:
             self.status, self.error = "Offline mode · restart without --offline to log in", True
             return
+        if self.demo:
+            self.controller.login(device_auth)
+            self.generation += 1
+            self.loading.clear()
+            self.refresh()
+            self.index = next((i for i, account in enumerate(self.accounts) if account.get("active")), 0)
+            self.status, self.error = "Demo login added · fictional account, no browser or network", False
+            self.status_until = time.monotonic() + 12
+            return
         self.client.close()
         self.action = True
         self.daemon_epoch += 1
@@ -242,6 +266,95 @@ class HubApp:
                 except (OSError, ValueError, TypeError, KeyError):
                     self.status += " · registry could not be refreshed"
                     self.error = True
+                if self.resumer_loaded:
+                    self.resumer.refresh(self.accounts)
+
+    def resume_selected(self):
+        if self.action or self.threads.pending or self.resumer.pending:
+            self.resumer.status, self.resumer.error = "Wait for the current operation to finish", True
+            return
+        try:
+            plan = resume_plan(self.resumer.selected, self.accounts, self.args.codex_bin, self.args.offline)
+        except (CommandError, OSError, ValueError, TypeError, KeyError) as error:
+            self.resumer.status, self.resumer.error = clean(error), True
+            return
+        self.client.close()
+        self.action = True
+        self.daemon_epoch += 1
+        self.generation += 1
+        self.loading.clear()
+        result, failed = "Returned from Codex", False
+        curses.def_prog_mode()
+        try:
+            self.threads.set_cursor(1)
+            curses.endwin()
+            print("\nCodex AccountDeck · Resume: " + clean(self.resumer.selected.title), flush=True)
+            if plan.archived:
+                restored = self.controller.run([self.args.codex_bin, "unarchive", "--", self.resumer.selected.id])
+                if restored.returncode:
+                    raise CommandError("Could not restore the archived thread")
+            if self.demo:
+                print("\nDEMO CONVERSATION · simulated resume\n")
+                print(self.resumer.store.content(self.resumer.selected, threading.Event()))
+                input("\nPress Enter to return to AccountDeck · no model or external process is used. ")
+                result, code = "Returned from demo conversation", 0
+            else:
+                with subprocess.Popen(plan.command, cwd=plan.cwd,
+                                      env={**os.environ, "CODEX_HOME": str(self.home)}) as process:
+                    try:
+                        code = process.wait()
+                    except KeyboardInterrupt:
+                        try:
+                            process.terminate()
+                        except ProcessLookupError:
+                            pass
+                        try:
+                            process.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait()
+                        code = 130
+            if code not in (0, 130):
+                result, failed = f"Codex exited with status {code}", True
+        except KeyboardInterrupt:
+            result = "Resume cancelled"
+        except (CommandError, OSError, EOFError) as error:
+            result, failed = clean(error), True
+        finally:
+            curses.reset_prog_mode()
+            self.screen.keypad(True)
+            self.screen.timeout(80)
+            curses.flushinp()
+            self.screen.clearok(True)
+            self.threads.set_cursor(0)
+            self.action = False
+        # Drain background messages before publishing the foreground result.
+        self.finish_messages()
+        self.refresh()
+        self.resumer.refresh(self.accounts)
+        self.status, self.error = result, failed
+        self.status_until = time.monotonic() + 8
+        self.check_daemon()
+
+    def rename_selected(self):
+        if self.action or self.threads.pending or self.resumer.pending:
+            self.resumer.status, self.resumer.error = "Wait for the current operation to finish", True
+            return
+        if not self.resumer.selected:
+            self.resumer.status, self.resumer.error = "Select a thread to rename", True
+            return
+        self.threads.target = self.resumer.selected
+        self.threads.mode, self.threads.editor = "rename", self.renamer.LineEditor()
+        self.threads.error = False
+
+    def finish_thread_actions(self):
+        pending = self.threads.pending
+        self.threads.finish_pending()
+        if pending and self.threads.pending is None:
+            self.status = self.threads.status if self.threads.error else "Renamed: " + self.threads.pending_name
+            self.error, self.status_until = self.threads.error, time.monotonic() + 8
+            if not self.threads.error:
+                self.resumer.refresh(self.accounts)
 
     def init_colors(self):
         try:
@@ -260,28 +373,31 @@ class HubApp:
     def draw_chrome(self):
         height, width = self.screen.getmaxyx()
         self.line(0, 2, "◈ CODEX ACCOUNTDECK", 21, self.style("accent") | curses.A_BOLD)
-        self.line(0, 25, "YOUR ACCOUNTS. ONE TERMINAL.", max(0, width - 55), self.style("muted"))
-        state = "● Server online" if self.daemon == "running" else "○ Server " + self.daemon
+        self.line(0, 25, "DEMO · FICTIONAL DATA" if self.demo else "YOUR ACCOUNTS. ONE TERMINAL.", max(0, width - 55), self.style("muted"))
+        state = "DEMO · simulated" if self.demo else "● Server online" if self.daemon == "running" else "○ Server " + self.daemon
         self.line(0, max(18, width - len(state) - 3), state, len(state),
                   self.style("green" if self.daemon == "running" else "muted"))
-        for tab, x, label in (("accounts", 2, " Accounts "), ("threads", 17, " Threads ")):
+        for tab, x, label in (("accounts", 2, " F1 Accounts "), ("threads", 17, " F2 Threads ")):
             attr = self.style("accent") | curses.A_BOLD
             if self.tab == tab:
                 attr |= curses.A_REVERSE
             self.line(2, x, label, len(label), attr)
-        self.line(2, 31, "← / → to change view", width - 34, self.style("muted"))
+        self.line(2, 33, "← / → / Tab change view", width - 36, self.style("muted"))
         self.line(height - 3, 2, "─" * (width - 4), width - 4, self.style("border"))
         if self.tab == "accounts":
             keys = ("↑↓ Select   Enter Switch+restart   → Threads   l Login   L Device login   r Refresh   d Restart   q Quit"
                     if width >= 110 else "↑↓ Select  Enter Switch  → Threads  l Login  r Reload  d Restart  q Quit")
         else:
-            keys = "↑↓ Select   Enter Rename   / Search   ← Accounts   r Refresh   q Quit"
+            keys = ("Enter Resume  Ctrl+R Rename  Type Search  F5 Reload  F6 Filters  F7 Columns  F8 Sort  F10 Quit"
+                    if width >= 100 else "Enter Resume  Ctrl+R Rename  Type Search  F6 Filters  F7 Columns  F10 Quit")
         self.line(height - 2, 2, keys, width - 4, self.style("muted"))
-        if self.action or self.tab == "accounts":
+        if self.action or self.tab == "accounts" or (self.tab == "threads" and time.monotonic() < self.status_until):
             message, error = self.status, self.error
         else:
-            message, error = self.thread_status(), self.threads.error
-        if self.loading or self.action or (self.tab == "threads" and self.threads.pending):
+            message, error = self.resumer.status, self.resumer.error
+        if self.tab == "threads" and self.threads.pending:
+            message, error = "Saving thread name…", False
+        if self.loading or self.action or (self.tab == "threads" and (self.threads.pending or self.resumer.pending)):
             spinner = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"[int(time.monotonic() * 10) % 10]
             message = spinner + " " + message
         self.line(height - 1, 2, clean(message), width - 4, self.style("red" if error else "accent"))
@@ -430,59 +546,13 @@ class HubApp:
         if len(self.accounts) > page_size:
             self.line(4, max(2, width - 23), f"{self.offset + 1}–{min(len(self.accounts), self.offset + page_size)} of {len(self.accounts)} · PgUp/Dn", 21, self.style("muted"))
 
-    def thread_status(self):
-        app = self.threads
-        if app.pending:
-            return "Saving thread name…" if app.pending_kind == "rename" else "Loading threads…"
-        if app.error:
-            return app.status
-        if app.status.startswith("Umbenannt:"):
-            return "Renamed: " + app.pending_name
-        return f"{len(app.visible)} threads · latest activity first" + (f" · filter: {app.query}" if app.query else "")
-
-    def draw_threads(self):
-        height, width = self.screen.getmaxyx()
-        app = self.threads
-        self.line(4, 2, f"THREADS  /  {len(app.visible)}" + ("  /  " + clean(app.query) if app.query else ""), width - 4,
-                  self.style("text") | curses.A_BOLD)
-        available = width - 6
-        project_width = min(28, max(12, available // 4))
-        title_width = available - project_width - 20
-        header = self.renamer.fit("LAST ACTIVE", 16) + "  " + self.renamer.fit("NAME", title_width) + "  PROJECT"
-        self.line(6, 3, header, available, self.style("muted") | curses.A_BOLD)
-        page_size = max(1, height - 15)
-        app.offset = min(app.offset, app.index)
-        if app.index >= app.offset + page_size:
-            app.offset = app.index - page_size + 1
-        for row, thread in enumerate(app.visible[app.offset:app.offset + page_size]):
-            selected = app.offset + row == app.index
-            text = self.renamer.fit(thread.last_active, 16) + "  " + self.renamer.fit(thread.title, title_width) + "  " + self.renamer.fit(thread.project, project_width)
-            style = app.thread_style(thread) | (curses.A_BOLD | curses.A_UNDERLINE if selected else 0)
-            if selected:
-                self.line(7 + row, 1, "›", 1, style)
-            self.line(7 + row, 3, text, available, style)
-        if not app.visible:
-            self.line(8, 4, "Loading threads…" if app.pending else "No matching threads.", width - 8, self.style("muted"))
-        self.line(height - 7, 2, "─" * (width - 4), width - 4, self.style("border"))
-        if app.visible:
-            thread = app.visible[app.index]
-            self.line(height - 6, 3, thread.title, width - 6, app.thread_style(thread) | curses.A_BOLD)
-            self.line(height - 5, 3, clean(thread.cwd), width - 6, self.style("muted"))
-            self.line(height - 4, 3, thread.id, width - 6, self.style("muted"))
-
     def draw_editor(self):
         app = self.threads
-        height, width = self.screen.getmaxyx()
-        columns = min(width - 6, 94)
-        window = curses.newwin(9, columns, (height - 9) // 2, (width - columns) // 2)
-        window.box()
-        rename = app.mode == "rename"
-        put = self.renamer.RenamerApp.put
-        put(window, 1, 2, "Rename thread" if rename else "Search threads", self.style("accent") | curses.A_BOLD)
-        put(window, 2, 2, "Current: " + app.target.title if rename else "Search name, project path or thread ID", self.style("muted"))
-        text, cursor = app.editor.viewport(columns - 6)
-        put(window, 4, 2, "> " + self.renamer.fit(text, columns - 6), curses.A_REVERSE)
-        put(window, 6, 2, "Enter Save · Empty / Esc Cancel" if rename else "Enter Search · Esc Cancel · Empty Show all", self.style("muted"))
+        window, columns, put = self.resumer.modal_window(self.screen, 9, "Rename thread", self.style)
+        put(window, 2, 2, "Current: " + app.target.title, self.style("muted"), columns - 5)
+        text, cursor = app.editor.viewport(columns - 9)
+        put(window, 4, 2, "> " + self.renamer.fit(text, columns - 8), self.style("accent") | curses.A_REVERSE, columns - 5)
+        put(window, 6, 2, "Enter Save · Empty / Esc Cancel · Ctrl+U Clear", self.style("muted"), columns - 5)
         if app.error:
             put(window, 7, 2, app.status, self.style("red"))
         window.move(4, 4 + cursor)
@@ -497,39 +567,64 @@ class HubApp:
             self.put(2, 0, "q / Esc: quit")
             self.screen.refresh()
             return
-        self.threads.set_cursor(int(bool(self.tab == "threads" and self.threads.mode)))
+        editing = self.tab == "threads" and (self.threads.mode or not self.resumer.mode or self.resumer.mode == "directory")
+        self.threads.set_cursor(int(bool(editing)))
         self.draw_chrome()
         if self.tab == "accounts":
             self.draw_accounts()
         else:
-            self.draw_threads()
+            self.resumer.draw(self.screen, self.line, self.style, self.threads.thread_style)
+            if not self.resumer.mode and not self.threads.mode:
+                self.resumer.place_cursor(self.screen)
         self.screen.noutrefresh()
         if self.tab == "threads" and self.threads.mode:
             self.draw_editor()
+        elif self.tab == "threads" and self.resumer.mode:
+            self.resumer.draw_modal(self.screen, self.style)
         curses.doupdate()
 
     def set_tab(self, tab):
         self.tab = tab
-        if tab == "threads" and not self.threads_loaded:
-            self.threads.refresh()
-            self.threads_loaded = True
+        if tab == "threads" and not self.resumer_loaded:
+            self.resumer.refresh(self.accounts)
+            self.resumer_loaded = True
 
     def handle_key(self, key):
-        if self.tab == "threads" and self.threads.mode:
-            return self.threads.handle_key(key, 1)
-        if key in ("q", "Q", "\x1b"):
-            if self.action:
-                self.status = "Finishing account/service operation · please wait before quitting"
+        if key in (curses.KEY_F1, curses.KEY_F2):
+            self.set_tab("accounts" if key == curses.KEY_F1 else "threads")
+            return True
+        if key == curses.KEY_F10:
+            if self.action or self.threads.pending:
+                self.status = "Finishing the current operation · please wait before quitting"
                 return True
             return False
+        if self.tab == "threads" and self.threads.mode:
+            return self.threads.handle_key(key, 1)
+        if self.tab == "threads" and self.resumer.mode:
+            self.resumer.handle_key(key, 1)
+            return True
         if key in (curses.KEY_LEFT, curses.KEY_RIGHT, "\t"):
-            tab = ("threads" if self.tab == "accounts" else "accounts") if key == "\t" else ("accounts" if key == curses.KEY_LEFT else "threads")
-            self.set_tab(tab)
+            self.set_tab("threads" if self.tab == "accounts" else "accounts")
             return True
         height, _ = self.screen.getmaxyx()
         if self.tab == "threads":
             if not self.action:
-                return self.threads.handle_key(key, max(1, height - 15))
+                self.status_until = 0.0
+                result = self.resumer.handle_key(key, self.resumer.page_size(height))
+                if result == "resume":
+                    self.resume_selected()
+                elif result == "rename":
+                    self.rename_selected()
+                elif result == "quit":
+                    return not self.threads.pending
+            return True
+        if key in ("q", "Q", "\x1b"):
+            if self.action or self.threads.pending:
+                self.status = "Finishing the current operation · please wait before quitting"
+                return True
+            return False
+        if key == curses.KEY_F5:
+            self.refresh()
             return True
         if key in (curses.KEY_UP, "k"):
             self.index = max(0, self.index - 1)
@@ -561,12 +656,12 @@ class HubApp:
         self.init_colors()
         self.refresh()
         self.check_daemon()
-        if self.tab == "threads":
-            self.set_tab("threads")
+        self.set_tab(self.tab)
         try:
             while True:
                 self.finish_messages()
-                self.threads.finish_pending()
+                self.finish_thread_actions()
+                self.resumer.finish_pending()
                 if time.monotonic() - self.last_refresh >= self.args.interval:
                     self.refresh()
                 self.draw()
@@ -590,6 +685,7 @@ class HubApp:
         if self.action_thread and self.action_thread.is_alive():
             self.action_thread.join()
         self.threads.close()
+        self.resumer.close()
 
 
 def main(argv=None):
@@ -599,19 +695,32 @@ def main(argv=None):
     parser.add_argument("--auth-bin", default="codex-auth")
     parser.add_argument("--renamer-dir", type=Path, default=Path(os.environ.get("CODEX_RENAMER_DIR") or ROOT),
                         help="Use a different renamer implementation (default: bundled)")
-    parser.add_argument("--renamer", action="store_true", help="Open directly in the Threads tab")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--renamer", action="store_true", help="Open the Threads tab (alias for --threads)")
+    mode.add_argument("--threads", "--resumer", dest="resumer", action="store_true", help="Open the Threads tab: search, resume and Ctrl+R to rename")
+    parser.add_argument("--directory", type=Path, help="Threads: filter this directory and its subfolders")
+    parser.add_argument("--demo", action="store_true", help="Screenshot/demo mode with disposable fictional accounts and threads; no network or external commands")
     parser.add_argument("--offline", action="store_true", help="Show saved limits; disable account refresh/switching and daemon restarts")
     parser.add_argument("--interval", type=int, default=180, help="Refresh interval in seconds (minimum 30)")
     parser.add_argument("--warning-days", type=int, default=7)
-    parser.add_argument("--limit", type=int, default=200, help="Number of recent threads to load")
+    parser.add_argument("--limit", type=int, default=200, help="Legacy option; the Threads tab always loads all local threads")
     parser.add_argument("--version", action="version", version=f"codex-accountdeck {VERSION}")
     args = parser.parse_args(argv)
     if args.interval < 30 or args.warning_days < 1 or args.limit < 1:
         parser.error("interval must be >=30, warning-days and limit must be positive")
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         parser.error("Open Codex AccountDeck in an interactive terminal")
-    app = None
+    app, demo_directory = None, None
+    original_directory = Path.cwd()
     try:
+        if args.demo:
+            from hub_demo import create_demo
+            demo_directory = tempfile.TemporaryDirectory(prefix="codex-accountdeck-demo-")
+            args.codex_home = Path(demo_directory.name)
+            args.renamer_dir = ROOT
+            create_demo(args.codex_home)
+            # Relative fictional project paths stay short and contain no real username.
+            os.chdir(args.codex_home)
         renamer = load_renamer(args.renamer_dir)
         renamer.configure_locale()
         app = HubApp(args, renamer)
@@ -624,6 +733,9 @@ def main(argv=None):
     finally:
         if app:
             app.close()
+        if demo_directory:
+            os.chdir(original_directory)
+            demo_directory.cleanup()
     return 0
 
 
