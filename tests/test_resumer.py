@@ -165,6 +165,23 @@ class ResumerTests(unittest.TestCase):
         finally:
             view.close()
 
+    def test_long_directory_filter_keeps_the_folder_and_subfolder_hint_visible(self):
+        view = ResumerView(self.home, load_renamer(PROJECT))
+        screen = Mock()
+        view.directory = "/var/folders/" + "temporary-profile-" * 8 + "/projects/luna"
+        try:
+            for width in (76, 80, 110):
+                screen.getmaxyx.return_value = (30, width)
+                line = Mock()
+                view.draw(screen, line, lambda name: 0, lambda row: 0)
+                summary = next(call.args for call in line.call_args_list if call.args[:2] == (7, 5))
+                displayed = view.renamer.clip(summary[2], summary[3])
+                self.assertIn("luna", displayed)
+                self.assertIn("(+ subfolders)", displayed)
+                self.assertIn("…", displayed)
+        finally:
+            view.close()
+
     def test_typing_during_initial_load_does_not_replace_it_with_empty_records(self):
         view = ResumerView(self.home, load_renamer(PROJECT))
         started, release = threading.Event(), threading.Event()

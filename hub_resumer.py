@@ -192,6 +192,14 @@ class ResumerView:
         self.status = "Searching titles, then prompts and conversation text…"
         self.index = self.offset = 0
 
+    def short_path(self, path, width):
+        text = clean(path)
+        if self.renamer.cell_width(text) <= width:
+            return text
+        while text and self.renamer.cell_width(text) > max(0, width - 1):
+            text = text[1:]
+        return "…" + text
+
     def draw(self, screen, line, style, thread_style):
         height, width = screen.getmaxyx()
         line(4, 2, f"{len(self.visible)} THREADS", width - 4, style("text") | curses.A_BOLD)
@@ -214,7 +222,9 @@ class ResumerView:
         line(7, 2, "╰" + "─" * (width - 6) + "╯", width - 4, style("accent"))
         scope = self.archive.title() + " · " + ("Full text" if self.full_text else "Titles & paths")
         if self.directory:
-            scope += " · " + self.directory + " (+ subfolders)"
+            suffix = " (+ subfolders)"
+            path_width = width - 14 - self.renamer.cell_width(scope + " · " + suffix)
+            scope += " · " + self.short_path(self.directory, max(1, path_width)) + suffix
         if self.account:
             scope += " · Login filter"
         if self.source:
