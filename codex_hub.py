@@ -24,7 +24,7 @@ from hub_resumer import ResumerView
 from hub_threads import resume_plan
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 UTC = timezone.utc
 
 

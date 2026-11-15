@@ -45,7 +45,7 @@ Other users report the same CLI symptom and related Desktop problems after accou
 
 You need **Python 3.10+ with `curses`**, the [Codex CLI](https://github.com/openai/codex), and [Codex-Auth](https://github.com/Loongphy/codex-auth) on your `PATH`. Tested on Linux/WSL and macOS, including automated terminal tests. The thread renamer is bundled.
 
-The combined Threads tab and demo are available on `main`. Use a GitHub/source installation below for these additions; Homebrew follows tagged releases.
+The combined Threads tab and screenshot demo are included in **1.3.0**. Existing Homebrew users can update with `brew update` followed by `brew upgrade nerdworldDE/tap/codex-accountdeck`.
 
 ### Homebrew
 
