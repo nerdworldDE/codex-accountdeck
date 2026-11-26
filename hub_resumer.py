@@ -1,4 +1,4 @@
-"""Thread browser UI; slow content searches stay off the curses event loop."""
+"""Thread browser with a background index and immediate filtering of its snapshot."""
 from __future__ import annotations
 
 import curses
@@ -6,11 +6,12 @@ import json
 import os
 from pathlib import Path
 from queue import Empty, Queue
+import sqlite3
 import threading
 import time
 
 from hub_accounts import clean
-from hub_threads import ThreadStore, account_label, in_directory, time_label
+from hub_threads import ThreadStore, account_label, in_directory, terms, time_label
 
 COLUMNS = {
     "updated": ("LAST ACTIVE", 16, 12), "title": ("TITLE", 45, 18),
@@ -27,20 +28,26 @@ class ResumerView:
     def __init__(self, home, renamer, directory=""):
         self.store, self.renamer = ThreadStore(home), renamer
         self.records, self.visible, self.accounts, self.snippets, self.ranks = [], [], [], {}, {}
+        self.candidates = []
         self.index = self.offset = self.choice = 0
         self.column_offset = 0
         self.mode = self.query = ""
         self.editor = None
         self.search_editor = renamer.LineEditor()
-        self.search_due, self.loaded = 0.0, False
+        self.loaded = False
         self.filter_draft, self.filter_choice = None, 0
         self.options, self.option_editor = [], renamer.LineEditor()
         self.directory, self.archive, self.account, self.source = directory, "active", "", ""
         self.include_agents, self.full_text = False, True
         self.columns, self.sort, self.reverse = list(DEFAULT_COLUMNS), "updated", True
-        self.status, self.error, self.pending = "Press F5 to load threads", False, False
+        self.status, self.error, self.pending = "Loading local threads…", False, False
         self.messages, self.generation, self.cancelled = Queue(), 0, threading.Event()
-        self.workers = []
+        self.jobs, self.search_worker = Queue(maxsize=1), None
+        self.index_worker, self.index_cancelled = None, threading.Event()
+        self.indexing = self.reload_requested = self.index_changed = False
+        self.last_index = 0.0
+        self.index_status = ""
+        self.excerpt_target, self.excerpt_due = None, 0.0
         self.settings = self.store.home / "accountdeck" / "resumer.json"
         try:
             data = json.loads(self.settings.read_text())
@@ -86,68 +93,171 @@ class ResumerView:
         self.index = min(self.index, max(0, len(self.visible) - 1))
         self.offset = min(self.offset, self.index)
 
-    def refresh(self, accounts=None, reload=True, preserve_selection=True):
+    def refresh(self, accounts=None, reload=True):
         if accounts is not None:
             self.accounts = list(accounts)
-        self.search_due = 0.0
-        reload = reload or not self.loaded
-        selected_id = self.selected.id if preserve_selection and self.selected else None
+        if reload or not self.loaded:
+            if self.indexing:
+                if reload:
+                    self.reload_requested = True
+                    self.index_cancelled.set()
+                return
+            self.start_index()
+        else:
+            self.apply_scope()
+
+    def start_index(self):
+        self.indexing = True
+        self.last_index = time.monotonic()
+        self.index_status = "Checking thread index…"
+        self.index_cancelled = cancelled = threading.Event()
+        if not self.loaded:
+            self.pending = True
+            self.status, self.error = "Loading local threads…", False
+
+        def work():
+            issue = ""
+            try:
+                records = self.store.load()
+                if not cancelled.is_set():
+                    self.messages.put(("catalog", None, records))
+                    unreadable = self.store.update_index(
+                        records, cancelled,
+                        lambda done, total, changed: self.messages.put(("index_progress", None, (done, total, changed))),
+                        prune=True)
+                    if unreadable:
+                        issue = f"{unreadable} conversations could not be indexed"
+            except Exception as error:
+                issue = "Thread index unavailable · " + clean(error)
+            finally:
+                self.messages.put(("index_done", None, "" if cancelled.is_set() else issue))
+
+        self.index_worker = threading.Thread(target=work, daemon=True, name="accountdeck-thread-index")
+        self.index_worker.start()
+
+    def apply_scope(self):
+        directories = {}
+        self.candidates = []
+        for row in self.records:
+            if ((row.agent and not self.include_agents)
+                    or (self.archive != "all" and row.archived != (self.archive == "archived"))
+                    or (self.account and row.owner_key != self.account)
+                    or (self.source and row.source != self.source)):
+                continue
+            if self.directory:
+                if row.cwd not in directories:
+                    directories[row.cwd] = in_directory(row.cwd, self.directory)
+                if not directories[row.cwd]:
+                    continue
+            self.candidates.append(row)
+        self.queue_search(preserve_selection=True)
+
+    def submit(self, job):
+        # Keep only the latest request while a search or excerpt is running.
+        try:
+            self.jobs.get_nowait()
+        except Empty:
+            pass
+        self.jobs.put_nowait(job)
+        if self.search_worker is None and job is not None:
+            def run():
+                while (next_job := self.jobs.get()) is not None:
+                    next_job()
+            self.search_worker = threading.Thread(target=run, daemon=True, name="accountdeck-thread-search")
+            self.search_worker.start()
+
+    def show_results(self, matches, ranks, selected_id):
+        self.visible, self.ranks = matches, ranks
+        self.sort_visible(selected_id)
+        self.pending, self.error = False, False
+        self.status = f"{len(self.visible)} matches / {len(self.records)} local threads"
+        # Load the detail excerpt after typing pauses so results never wait for it.
+        self.excerpt_due = time.monotonic() + .15
+
+    def queue_search(self, preserve_selection=False):
         self.cancelled.set()
         self.cancelled = cancelled = threading.Event()
         self.generation += 1
+        self.snippets, self.excerpt_target = {}, None
+        if not self.loaded:
+            return
+        self.index_changed = False
+        selected_id = self.selected.id if preserve_selection and self.selected else None
+        if not terms(self.query):
+            self.offset = 0 if not preserve_selection else self.offset
+            self.show_results(list(self.candidates), {}, selected_id)
+            return
         generation = self.generation
-        self.pending, self.error = True, False
-        self.status = "Loading local threads…" if reload else "Searching titles, then prompts and conversation text…"
-        # Capture mutable view state before the worker starts.
-        old_records, accounts, query, full_text = self.records, list(self.accounts), self.query, self.full_text
-        directory, archive, account, source, agents = self.directory, self.archive, self.account, self.source, self.include_agents
+        candidates, query, accounts, full_text = self.candidates, self.query, self.accounts, self.full_text
+        self.pending, self.error, self.status = True, False, "Filtering local threads…"
+
         def work():
             try:
-                records = self.store.load() if reload else old_records
-                if cancelled.is_set():
-                    return
-                candidates = [row for row in records if (agents or not row.agent)
-                              and (archive == "all" or row.archived == (archive == "archived"))
-                              and (not account or row.owner_key == account)
-                              and (not source or row.source == source)
-                              and (not directory or in_directory(row.cwd, directory))]
-                def progress(done, total):
-                    self.messages.put((generation, "progress", f"Searching thread text · {done}/{total} indexed"))
-                result = self.store.search(candidates, query, accounts, cancelled, progress, full_text)
+                result = self.store.search(candidates, query, accounts, cancelled, full_text)
                 if result is not None and not cancelled.is_set():
-                    self.messages.put((generation, "done", (records, result, selected_id)))
+                    self.messages.put(("results", generation, (*result, selected_id)))
             except Exception as error:
                 if not cancelled.is_set():
-                    self.messages.put((generation, "error", clean(error)))
-        self.workers = [worker for worker in self.workers if worker.is_alive()]
-        worker = threading.Thread(target=work, daemon=True, name="accountdeck-thread-search")
-        self.workers.append(worker)
-        worker.start()
+                    self.messages.put(("search_error", generation, clean(error)))
+
+        self.submit(work)
+
+    def queue_excerpt(self):
+        row = self.selected
+        if (self.pending or not row or row.id == self.excerpt_target or row.id in self.snippets
+                or time.monotonic() < self.excerpt_due):
+            return
+        _, prompt, body = self.ranks.get(row.id, (0, 0, 0))
+        if not (prompt or body):
+            return
+        generation, query, cancelled = self.generation, self.query, self.cancelled
+        self.excerpt_target = row.id
+
+        def work():
+            if cancelled.is_set():
+                return
+            try:
+                excerpt = self.store.excerpt(row.id, query, bool(prompt))
+            except (OSError, ValueError, sqlite3.Error):
+                excerpt = ""
+            if not cancelled.is_set():
+                self.messages.put(("excerpt", generation, (row.id, excerpt)))
+
+        self.submit(work)
 
     def finish_pending(self):
-        if self.search_due and time.monotonic() >= self.search_due:
-            self.refresh(reload=False, preserve_selection=False)
         while True:
             try:
-                generation, kind, payload = self.messages.get_nowait()
+                kind, generation, payload = self.messages.get_nowait()
             except Empty:
-                return
-            if generation != self.generation:
+                break
+            if generation is not None and generation != self.generation:
                 continue
-            if kind == "progress":
-                self.status = payload
-            elif kind == "error":
+            if kind == "catalog" and not self.reload_requested:
+                self.records, self.loaded = payload, True
+                self.apply_scope()
+            elif kind == "index_progress" and not self.reload_requested:
+                done, total, changed = payload
+                self.index_status = f"Indexing {done}/{total} threads"
+                self.index_changed |= changed
+            elif kind == "index_done":
+                self.indexing, self.index_status = False, payload
+                if self.reload_requested:
+                    self.reload_requested = False
+                    self.start_index()
+                elif not self.loaded:
+                    self.pending, self.error, self.status = False, True, payload or "Unable to load threads · F5 retries"
+            elif kind == "search_error":
+                self.visible, self.ranks, self.index, self.offset = [], {}, 0, 0
                 self.pending, self.error, self.status = False, True, payload
-            else:
-                self.records, (self.visible, self.snippets, unreadable, self.ranks), selected_id = payload
-                self.loaded = True
-                self.sort_visible(selected_id)
-                self.pending, self.error = False, bool(unreadable)
-                self.status = f"{len(self.visible)} matches / {len(self.records)} local threads"
-                if self.query.strip():
-                    self.status += " · title → prompt → text"
-                if unreadable:
-                    self.status += f" · {unreadable} conversations could not be searched"
+            elif kind == "results":
+                self.show_results(*payload)
+            elif kind == "excerpt":
+                identity, excerpt = payload
+                self.snippets[identity] = excerpt
+        if self.index_changed and not self.pending and self.full_text and terms(self.query):
+            self.queue_search(preserve_selection=True)
+        self.queue_excerpt()
 
     def value(self, row, key):
         if key in ("updated", "created"):
@@ -183,14 +293,6 @@ class ResumerView:
     @staticmethod
     def page_size(height):
         return max(1, height - (19 if height >= 22 else 15))
-
-    def queue_search(self):
-        self.cancelled.set()
-        self.generation += 1
-        self.search_due = time.monotonic() + .12
-        self.pending, self.error = True, False
-        self.status = "Searching titles, then prompts and conversation text…"
-        self.index = self.offset = 0
 
     def short_path(self, path, width):
         text = clean(path)
@@ -551,5 +653,8 @@ class ResumerView:
 
     def close(self):
         self.cancelled.set()
-        for worker in self.workers:
-            worker.join(timeout=3)
+        self.index_cancelled.set()
+        self.submit(None)
+        for worker in (self.index_worker, self.search_worker):
+            if worker is not None:
+                worker.join(timeout=2)

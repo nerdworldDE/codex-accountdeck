@@ -105,21 +105,42 @@ def create_demo(home):
 class DemoAccountService:
     def __init__(self, home):
         self.home = Path(home)
+        self.credits = {}
+        self.usage = {}
+
+    def saved_credits(self, account):
+        key = account["account_key"]
+        if key not in self.credits:
+            index = int(key.split("::")[0].rsplit("-", 1)[1])
+            now = datetime.now(UTC)
+            first_expiry = (8, 2, .4, 12)[index % 4]
+            self.credits[key] = [{"id": f"demo-credit-{index}-{i}", "title": "Full reset",
+                                 "expires_at": (now + timedelta(days=first_expiry + i * 7)).isoformat()}
+                                for i in range(account.get("reset_count") or 0)]
+        return self.credits[key]
 
     def fetch(self, account, section):
         now = datetime.now(UTC)
         result = {"account_key": account["account_key"]}
         if section == "usage":
-            result.update(usage=account["usage"], usage_live=True, usage_error=None, usage_at=now.timestamp())
+            result.update(usage=self.usage.get(account["account_key"], account["usage"]),
+                          usage_live=True, usage_error=None, usage_at=now.timestamp())
         else:
-            index = int(account["account_key"].split("::")[0].rsplit("-", 1)[1])
-            count = account.get("reset_count") or 0
-            first_expiry = (8, 2, .4, 12)[index % 4]
-            result.update(credits=[{"id": f"demo-credit-{index}-{i}", "title": "Full reset",
-                                    "expires_at": (now + timedelta(days=first_expiry + i * 7)).isoformat()}
-                                   for i in range(count)],
-                          reset_count=count, resets_live=True, resets_error=None, resets_at=now.timestamp())
+            credits = self.saved_credits(account)
+            result.update(credits=credits, reset_count=len(credits), resets_live=True, resets_error=None,
+                          resets_at=now.timestamp())
         return result
+
+    def redeem(self, account, credit_id):
+        credits = self.saved_credits(account)
+        remaining = [credit for credit in credits if credit["id"] != credit_id]
+        if len(remaining) == len(credits):
+            raise CommandError("This demo reset is no longer available")
+        key = account["account_key"]
+        usage = dict(self.usage.get(key, account["usage"]))
+        for field in ("primary", "secondary"):
+            usage[field] = dict(usage[field], used_percent=0)
+        self.credits[key], self.usage[key] = remaining, usage
 
 
 class DemoController:

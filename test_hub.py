@@ -160,6 +160,48 @@ class AccountTests(unittest.TestCase):
         live.write_text(json.dumps({"tokens": {"access_token": token("user-0", "live"), "account_id": "workspace"}}))
         self.assertTrue(service._tokens(account)["access_token"].endswith("live"))
 
+    def test_reset_spends_only_the_confirmed_credit_with_the_selected_login(self):
+        account = registry_snapshot(self.home)[1]  # This account is inactive.
+        claims = {"https://api.openai.com/auth": {"chatgpt_user_id": "user-1"}}
+        payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+        token = "header." + payload + ".signature"
+        key = base64.urlsafe_b64encode(account["account_key"].encode()).decode().rstrip("=")
+        path = self.home / "accounts" / f"{key}.auth.json"
+        path.write_text(json.dumps({"tokens": {"access_token": token, "account_id": "workspace"}}))
+        service = AccountService(self.home)
+        credits = b'{"credits":[{"id":"first","status":"available"},{"id":"chosen","status":"available"}]}'
+        with patch("urllib.request.build_opener") as build:
+            open_request = build.return_value.open
+            open_request.side_effect = [io.BytesIO(credits), TimeoutError(), io.BytesIO(credits),
+                                        io.BytesIO(b'{"code":"reset","windows_reset":2}')]
+            with self.assertRaisesRegex(CommandError, "outcome unknown"):
+                service.redeem(account, "chosen")
+            service.redeem(account, "chosen")
+            requests = [call.args[0] for call in open_request.call_args_list]
+        self.assertEqual([request.get_method() for request in requests], ["GET", "POST", "GET", "POST"])
+        self.assertEqual(requests[1].full_url, "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume")
+        self.assertEqual(requests[1].get_header("Authorization"), "Bearer " + token)
+        self.assertEqual(requests[1].get_header("Chatgpt-account-id"), "workspace")
+        self.assertEqual(json.loads(requests[1].data)["credit_id"], "chosen")
+        self.assertEqual(requests[1].data, requests[3].data)
+        self.assertTrue(registry_snapshot(self.home)[0]["active"])
+        self.assertFalse((self.home / "commands.jsonl").exists())
+
+    def test_reset_refuses_the_wrong_account_or_a_credit_that_is_no_longer_available(self):
+        account = registry_snapshot(self.home)[1]
+        service = AccountService(self.home)
+        with patch.object(service, "_request") as request, patch("hub_accounts.token_identity", return_value=("user-0", "workspace")):
+            with self.assertRaisesRegex(CommandError, "Account identity changed"):
+                service.redeem(account, "chosen")
+            request.assert_not_called()
+        with patch.object(service, "_request", return_value={"credits": [{"id": "chosen", "status": "redeemed"},
+                                                                          {"id": "different", "status": "available"}]}) as request, \
+                patch("hub_accounts.token_identity", return_value=("user-1", "workspace")):
+            with self.assertRaisesRegex(CommandError, "no longer available"):
+                service.redeem(account, "chosen")
+            self.assertEqual(request.call_count, 1)
+            self.assertEqual(request.call_args.args[0], "rate-limit-reset-credits")
+
     def test_merging_updates_activation_without_losing_live_resets(self):
         old = registry_snapshot(self.home)
         old[0]["credits"] = [{"expires_at": None}]

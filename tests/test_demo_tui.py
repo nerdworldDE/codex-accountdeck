@@ -1,4 +1,5 @@
 """The public --demo entry point is usable in an 80x24 screenshot terminal."""
+from contextlib import closing
 import fcntl
 import os
 from pathlib import Path
@@ -28,7 +29,7 @@ class DemoTerminalTests(unittest.TestCase):
             sentinel.write_text("REAL-HOME-SENTINEL")
             master, slave = pty.openpty()
             fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
-            process = subprocess.Popen([sys.executable, str(PROJECT / "codex_hub.py"), "--demo", "--threads",
+            process = subprocess.Popen([sys.executable, str(PROJECT / "codex_hub.py"), "--demo",
                                         "--codex-home", str(root), "--codex-bin", "/no-real-codex",
                                         "--auth-bin", "/no-real-auth"], stdin=slave, stdout=slave, stderr=slave,
                                        cwd=PROJECT, env={**os.environ, "TERM": "xterm-256color",
@@ -53,6 +54,27 @@ class DemoTerminalTests(unittest.TestCase):
                 wait_until(lambda: text.encode() in transcript)
             try:
                 wait_for("DEMO")
+                wait_for("4 ACCOUNTS")
+                wait_for("All accounts up to date")
+                def indexed_before_opening_threads():
+                    index = list(scratch.glob("*/accountdeck/thread-search.sqlite"))
+                    if not index:
+                        return False
+                    try:
+                        with closing(sqlite3.connect(index[0].as_uri() + "?mode=ro", uri=True)) as db:
+                            return db.execute("SELECT count(*) FROM search_terms").fetchone()[0] == 9
+                    except sqlite3.Error:
+                        return False
+                wait_until(indexed_before_opening_threads)
+                os.write(master, b"\x1bOBx")  # Down selects Personal; x opens the credit picker.
+                wait_for("Redeem saved reset")
+                wait_for("Account: Personal")
+                os.write(master, b"\x1b")  # Cancel once, then open for explicit confirmation.
+                time.sleep(.10)
+                self.assertNotIn(b"Reset redeemed", transcript)
+                os.write(master, b"xy")
+                wait_for("Reset redeemed for Personal")
+                os.write(master, b"\x1bOQ")  # F2
                 wait_for("Build a thread resumer")
                 os.write(master, b"shutter")  # Typing starts a live full-text search
                 wait_for("1 matches / 9 local threads")

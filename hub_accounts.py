@@ -12,11 +12,13 @@ import signal
 import subprocess
 import urllib.error
 import urllib.request
+from uuid import uuid4
 
 from codex_resets import NoRedirect, available_credits, timestamp
 
 UTC = timezone.utc
 BASE_URL = "https://chatgpt.com/backend-api/wham/"
+RESET_CREDITS = "rate-limit-reset-credits"
 
 
 def clean(value):
@@ -49,6 +51,12 @@ def usable_credits(account, now=None):
         [c for c in account.get("credits") or [] if expires_in(c, now) is None or expires_in(c, now) > 0],
         key=lambda c: (expires_in(c, now) is None, expires_in(c, now) or 0),
     )
+
+
+def redeemable_credits(account):
+    return [credit for credit in usable_credits(account)
+            if isinstance(credit.get("id"), str) and credit["id"]
+            and credit.get("is_supported_by_plan") is not False]
 
 
 def reset_count(account, now=None):
@@ -105,10 +113,18 @@ def merge_local(local, previous):
     return local
 
 
+def token_identity(tokens):
+    payload = tokens["access_token"].split(".")[1]
+    claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    auth = claims.get("https://api.openai.com/auth", {})
+    return auth.get("chatgpt_user_id") or auth.get("user_id"), tokens.get("account_id")
+
+
 class AccountService:
     def __init__(self, home, timeout=12):
         self.home = Path(home)
         self.timeout = timeout
+        self.redemption_requests = {}
 
     def _tokens(self, account):
         key = base64.urlsafe_b64encode(account["account_key"].encode()).decode().rstrip("=")
@@ -118,26 +134,29 @@ class AccountService:
         # Only use it when BOTH user and workspace match the stored identity.
         try:
             live = json.loads((self.home / "auth.json").read_text())["tokens"]
-            def identity(value):
-                payload = value["access_token"].split(".")[1]
-                claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
-                auth = claims.get("https://api.openai.com/auth", {})
-                return auth.get("chatgpt_user_id"), value.get("account_id")
-            user, workspace = identity(tokens)
-            if user and workspace and identity(live) == (user, workspace):
+            user, workspace = token_identity(tokens)
+            if user and workspace and token_identity(live) == (user, workspace):
                 tokens = live
-        except (OSError, ValueError, KeyError, IndexError, TypeError):
+        except (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError):
             pass
         if not tokens.get("access_token") or not tokens.get("account_id"):
             raise ValueError("Missing ChatGPT authentication")
         return tokens
 
     def _get(self, endpoint, tokens):
-        request = urllib.request.Request(BASE_URL + endpoint, headers={
+        return self._request(endpoint, tokens)
+
+    def _request(self, endpoint, tokens, payload=None):
+        headers = {
             "Authorization": "Bearer " + tokens["access_token"],
             "ChatGPT-Account-Id": tokens["account_id"],
             "Accept": "application/json", "User-Agent": "codex-accountdeck/1.2",
-        })
+        }
+        data = None
+        if payload is not None:
+            headers["Content-Type"] = "application/json"
+            data = json.dumps(payload).encode("utf-8")
+        request = urllib.request.Request(BASE_URL + endpoint, data=data, headers=headers)
         with urllib.request.build_opener(NoRedirect).open(request, timeout=self.timeout) as response:
             return json.load(response)
 
@@ -175,12 +194,56 @@ class AccountService:
                 result.update(usage=usage, usage_at=datetime.now(UTC).timestamp(),
                               usage_live=True, usage_error=None)
             else:
-                data = self._get("rate-limit-reset-credits", tokens)
+                data = self._get(RESET_CREDITS, tokens)
                 result.update(credits=available_credits(data), reset_count=data.get("available_count"),
                               resets_at=datetime.now(UTC).timestamp(), resets_live=True, resets_error=None)
         except (OSError, ValueError, KeyError, TypeError, IndexError) as error:
             result.update({section + "_error": self._error(error), section + "_live": False})
         return result
+
+    def redeem(self, account, credit_id):
+        key = account["account_key"]
+        try:
+            tokens = self._tokens(account)
+            user, workspace = token_identity(tokens)
+            if not user or not workspace or key != f"{user}::{workspace}":
+                raise CommandError("Account identity changed · sign in again before redeeming")
+            credits = available_credits(self._get(RESET_CREDITS, tokens))
+        except (OSError, ValueError, KeyError, IndexError, TypeError, AttributeError) as error:
+            raise CommandError("Could not verify the reset · " + self._error(error)) from None
+        if not any(credit_id == credit["id"] for credit in redeemable_credits({"credits": credits})):
+            raise CommandError("This reset is no longer available for this account")
+
+        # An explicit credit ID pins the redemption even if another client redeems first.
+        # Keep the request ID after an ambiguous result, so a user retry is idempotent.
+        request_key = (key, credit_id)
+        request_id = self.redemption_requests.setdefault(request_key, str(uuid4()))
+        unknown = "Reset outcome unknown · check refreshed balances before retrying"
+        try:
+            result = self._request(RESET_CREDITS + "/consume", tokens,
+                                   {"credit_id": credit_id, "redeem_request_id": request_id})
+        except urllib.error.HTTPError as error:
+            if error.code == 401:
+                raise CommandError("Sign-in expired · press l to log in") from None
+            if 400 <= error.code < 500:
+                raise CommandError(f"ChatGPT rejected the reset (HTTP {error.code}) · check refreshed balances") from None
+            raise CommandError(unknown) from None
+        except (OSError, ValueError, TypeError):
+            raise CommandError(unknown) from None
+
+        code = result.get("code") if isinstance(result, dict) else None
+        if code == "reset":
+            self.redemption_requests.pop(request_key, None)
+            return
+        errors = {
+            "nothing_to_reset": "No covered limit needs a reset yet · credit still available",
+            "no_credit": "This reset is no longer available for this account",
+            "already_redeemed": "This reset was already redeemed · check refreshed balances",
+        }
+        if isinstance(code, str) and code in errors:
+            self.redemption_requests.pop(request_key, None)
+            raise CommandError(errors[code])
+        raise CommandError(unknown)
 
 
 class CommandError(Exception):

@@ -2,28 +2,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from contextlib import contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from datetime import datetime
 import json
+from itertools import chain, islice
 import os
 from pathlib import Path
 import re
 import shlex
 import sqlite3
 import threading
+import time
 
 from hub_accounts import CommandError, clean
 
 
 @contextmanager
 def read_only(path):
-    connection = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True, timeout=2)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA query_only=ON")
-    try:
+    uri = Path(path).resolve().as_uri() + "?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True, timeout=2)) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only=ON")
         yield connection
-    finally:
-        connection.close()
 
 
 def session_meta(path):
@@ -32,7 +32,8 @@ def session_meta(path):
     try:
         with Path(path).open(encoding="utf-8") as stream:
             item = json.loads(stream.readline(16 * 1024 * 1024))
-        return item.get("payload", {}) if item.get("type") == "session_meta" else {}
+        payload = item.get("payload")
+        return payload if item.get("type") == "session_meta" and isinstance(payload, dict) else {}
     except (OSError, ValueError, AttributeError):
         return {}
 
@@ -101,6 +102,18 @@ def terms(query):
         return [query.casefold()] if query else []
 
 
+def search_text(text):
+    return text.casefold().replace("\0", " ")
+
+
+def short_grams(text):
+    # A small exact lookup for one- and two-character searches, which FTS5's
+    # trigram tokenizer cannot answer. Delimit whole grams for BLOB instr().
+    chars = set(text)
+    pairs = set(zip(text, islice(text, 1, None)))
+    return b"\0" + b"\0".join(gram.encode("utf-8") for gram in chain(chars, map("".join, pairs))) + b"\0"
+
+
 def text_parts(value):
     """Extract textual content, excluding image data, paths and transport metadata."""
     if isinstance(value, str):
@@ -141,6 +154,7 @@ class ThreadStore:
     def __init__(self, home, cache_dir=None):
         self.home = Path(home).expanduser().resolve()
         self.cache_dir = Path(cache_dir) if cache_dir else self.home / "accountdeck"
+        self.cache_path = self.cache_dir / "thread-search.sqlite"
         self.paths = {}
 
     @staticmethod
@@ -156,10 +170,12 @@ class ThreadStore:
             seen.add(identity)
             result.append((identity, path, ordinal, end))
             base = session_meta(path).get("history_base")
-            if not isinstance(base, dict) or not base.get("thread_id"):
+            if not isinstance(base, dict) or not isinstance(base.get("thread_id"), str) or not base["thread_id"]:
                 return list(reversed(result))
             identity = base["thread_id"]
             ordinal, end = base.get("end_ordinal_exclusive"), base.get("end_byte_offset")
+            if any(bound is not None and (not isinstance(bound, int) or bound < 0) for bound in (ordinal, end)):
+                raise OSError("Invalid inherited transcript boundary")
             path = self.paths.get(identity, "")
             if not path:
                 for collection in ("sessions", "archived_sessions"):
@@ -218,9 +234,13 @@ class ThreadStore:
                 meta = session_meta(path)
                 if not meta.get("id"):
                     continue
+                try:
+                    updated = int(path.stat().st_mtime)
+                except OSError:
+                    continue
                 result.append(SavedThread(
                     id=meta["id"], title=clean(names.get(meta["id"]) or meta.get("title") or meta["id"]),
-                    cwd=meta.get("cwd") or "", updated=int(path.stat().st_mtime), source=str(meta.get("source") or ""),
+                    cwd=meta.get("cwd") or "", updated=updated, source=str(meta.get("source") or ""),
                     archived=archived, user_id=meta.get("creator_user_id") or "",
                     account_id=meta.get("creator_account_id") or "", path=str(path),
                     agent=bool(meta.get("parent_thread_id") or meta.get("agent_path")),
@@ -241,7 +261,8 @@ class ThreadStore:
             if history.exists():
                 try:
                     with read_only(history) as db:
-                        rows = db.execute("SELECT item_json FROM thread_items WHERE thread_id=? AND (? IS NULL OR rollout_ordinal < ?) ORDER BY rollout_ordinal", (identity, ordinal, ordinal))
+                        scope, parameters = self.history_scope(identity, ordinal)
+                        rows = db.execute(f"SELECT item_json FROM thread_items WHERE {scope} ORDER BY rollout_ordinal", parameters)
                         for row in rows:
                             if cancelled.is_set():
                                 return None
@@ -273,88 +294,255 @@ class ThreadStore:
         parts = self.content_parts(thread, cancelled, segments)
         return parts[1] if parts is not None else None
 
-    def search(self, records, query, accounts, cancelled=None, progress=None, full_text=True):
+    @staticmethod
+    def history_scope(identity, ordinal):
+        if ordinal is None:
+            return "thread_id=?", (identity,)
+        return "thread_id=? AND rollout_ordinal < ?", (identity, ordinal)
+
+    def fingerprints(self, thread, segments, history, has_revisions):
+        rollouts, files, revisions = [], [], []
+        missing_file = False
+        for identity, path, ordinal, end in segments:
+            try:
+                stat = Path(path).stat() if path else None
+            except FileNotFoundError:
+                stat = None
+            rollouts.append((identity, ordinal, end, stat.st_mtime_ns if stat else 0, stat.st_size if stat else 0))
+            files.append((stat.st_dev, stat.st_ino) if stat else None)
+            missing_file |= stat is None
+            if history:
+                scope, parameters = self.history_scope(identity, ordinal)
+                maximum = history.execute(f"SELECT max(rollout_ordinal) FROM thread_items WHERE {scope}", parameters).fetchone()[0]
+                revision = (history.execute(f"SELECT max(updated_at_ordinal) FROM thread_items WHERE {scope}", parameters).fetchone()[0]
+                            if maximum is not None and has_revisions else None)
+                revisions.append((maximum, revision))
+        # Keep recognizing the previous cache so the first upgrade can index
+        # its text without rereading unchanged transcripts.
+        legacy_parts = ";".join(":".join(map(str, part)) for part in rollouts)
+        legacy = f"ranked-v2:{thread.updated}:{legacy_parts}"
+        if missing_file:
+            for name in ("thread_history_1.sqlite", "thread_history_1.sqlite-wal"):
+                try:
+                    legacy += f":{(self.home / name).stat().st_mtime_ns}"
+                except FileNotFoundError:
+                    continue
+        fingerprint = json.dumps((3, rollouts, files, revisions), separators=(",", ":"))
+        return fingerprint, legacy
+
+    @contextmanager
+    def cache_writer(self):
+        self.cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        descriptor = os.open(self.cache_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            os.fchmod(descriptor, 0o600)
+        finally:
+            os.close(descriptor)
+        with closing(sqlite3.connect(self.cache_path, timeout=2)) as cache:
+            cache.execute("PRAGMA journal_mode=WAL")
+            cache.execute("PRAGMA synchronous=NORMAL")
+            with cache:
+                cache.execute("BEGIN IMMEDIATE")
+                cache.execute("CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, text TEXT NOT NULL, prompts TEXT NOT NULL)")
+                if "prompts" not in {row[1] for row in cache.execute("PRAGMA table_info(documents)")}:
+                    cache.execute("ALTER TABLE documents ADD COLUMN prompts TEXT NOT NULL DEFAULT ''")
+                cache.execute("CREATE TABLE IF NOT EXISTS search_terms (document INTEGER PRIMARY KEY, body BLOB NOT NULL, prompts BLOB NOT NULL)")
+                try:
+                    # The cached originals live in documents. FTS stores just
+                    # the case-folded index, including positions for exact phrases.
+                    cache.execute("CREATE VIRTUAL TABLE IF NOT EXISTS search_text USING fts5(body, prompts, content='', tokenize='trigram case_sensitive 1')")
+                    cache.execute("SELECT rowid FROM search_text WHERE search_text MATCH 'abc' LIMIT 1").fetchone()
+                    fts = True
+                except sqlite3.OperationalError as error:
+                    if "no such module" not in str(error) and "no such tokenizer" not in str(error):
+                        raise
+                    fts = False
+                version = 1 if fts else 2
+                if cache.execute("PRAGMA user_version").fetchone()[0] != version:
+                    if fts:
+                        cache.execute("INSERT INTO search_text(search_text) VALUES('delete-all')")
+                        cache.execute("DELETE FROM search_terms")
+                    cache.execute(f"PRAGMA user_version={version}")
+            yield cache, fts
+
+    @staticmethod
+    def remove_from_index(cache, fts, document, old_text, old_prompts):
+        if fts:
+            cache.execute("INSERT INTO search_text(search_text, rowid, body, prompts) VALUES('delete', ?, ?, ?)",
+                          (document, search_text(old_text), search_text(old_prompts)))
+        cache.execute("DELETE FROM search_terms WHERE document=?", (document,))
+
+    def update_document(self, cache, fts, thread, history, has_revisions, cancelled):
+        segments = self.history_segments(thread)
+        fingerprint, legacy = self.fingerprints(thread, segments, history, has_revisions)
+        cached = cache.execute("""SELECT d.rowid, d.fingerprint, t.document IS NOT NULL
+                                FROM documents d LEFT JOIN search_terms t ON t.document=d.rowid
+                                WHERE d.id=?""", (thread.id,)).fetchone()
+        if cached and cached[1] == fingerprint and cached[2]:
+            return False
+        if cached and cached[1] in (fingerprint, legacy):
+            prompts, body = cache.execute("SELECT prompts, text FROM documents WHERE rowid=?", (cached[0],)).fetchone()
+        else:
+            parts = self.content_parts(thread, cancelled, segments)
+            if parts is None:
+                return False
+            prompts, body = parts
+        folded_body, folded_prompts = search_text(body), search_text(prompts)
+        short_body, short_prompts = short_grams(folded_body), short_grams(folded_prompts)
+        if cancelled.is_set():
+            return False
+        with cache:
+            cache.execute("BEGIN IMMEDIATE")
+            old = cache.execute("""SELECT d.rowid, d.fingerprint, t.document IS NOT NULL
+                                  FROM documents d LEFT JOIN search_terms t ON t.document=d.rowid
+                                  WHERE d.id=?""", (thread.id,)).fetchone()
+            if old != cached:
+                return False  # Another AccountDeck indexed this document in the meantime.
+            if old and old[2]:
+                old_text, old_prompts = cache.execute("SELECT text, prompts FROM documents WHERE rowid=?", (old[0],)).fetchone()
+                self.remove_from_index(cache, fts, old[0], old_text, old_prompts)
+            if old:
+                document = old[0]
+                if cached[1] in (fingerprint, legacy):
+                    cache.execute("UPDATE documents SET fingerprint=? WHERE rowid=?", (fingerprint, document))
+                else:
+                    cache.execute("UPDATE documents SET fingerprint=?, text=?, prompts=? WHERE rowid=?",
+                                  (fingerprint, body, prompts, document))
+            else:
+                document = cache.execute("INSERT INTO documents(id, fingerprint, text, prompts) VALUES(?, ?, ?, ?)",
+                                         (thread.id, fingerprint, body, prompts)).lastrowid
+            cache.execute("INSERT INTO search_terms VALUES(?, ?, ?)", (document, short_body, short_prompts))
+            if fts:
+                cache.execute("INSERT INTO search_text(rowid, body, prompts) VALUES(?, ?, ?)",
+                              (document, folded_body, folded_prompts))
+        return True
+
+    def prune_index(self, cache, fts, records, cancelled):
+        current = {row.id for row in records}
+        for (identity,) in cache.execute("SELECT id FROM documents").fetchall():
+            if cancelled.is_set():
+                break
+            if identity in current:
+                continue
+            with cache:
+                cache.execute("BEGIN IMMEDIATE")
+                old = cache.execute("""SELECT d.rowid, d.text, d.prompts, t.document IS NOT NULL
+                                     FROM documents d LEFT JOIN search_terms t ON t.document=d.rowid
+                                     WHERE d.id=?""", (identity,)).fetchone()
+                if old:
+                    if old[3]:
+                        self.remove_from_index(cache, fts, *old[:3])
+                    cache.execute("DELETE FROM documents WHERE rowid=?", (old[0],))
+
+    def update_index(self, records, cancelled=None, progress=None, prune=False):
+        """Refresh the persistent index independently of any search query."""
+        cancelled = cancelled or threading.Event()
+        if cancelled.is_set() or not (records or self.cache_path.is_file()):
+            return 0
+        unreadable, changed, last_report = 0, False, 0.0
+        history_path = self.home / "thread_history_1.sqlite"
+        with ExitStack() as stack:
+            history, has_revisions = None, False
+            if history_path.is_file():
+                db = stack.enter_context(read_only(history_path))
+                columns = {row[1] for row in db.execute("PRAGMA table_info(thread_items)")}
+                if {"thread_id", "rollout_ordinal"} <= columns:
+                    history, has_revisions = db, "updated_at_ordinal" in columns
+            cache, fts = stack.enter_context(self.cache_writer())
+            for done, thread in enumerate(sorted(records, key=lambda row: row.updated, reverse=True), 1):
+                if cancelled.is_set():
+                    return unreadable
+                try:
+                    changed |= self.update_document(cache, fts, thread, history, has_revisions, cancelled)
+                except (OSError, UnicodeError):
+                    unreadable += 1
+                now = time.monotonic()
+                if progress and (done == len(records) or now - last_report >= .5):
+                    progress(done, len(records), changed)
+                    changed, last_report = False, now
+            if prune and not cancelled.is_set():
+                self.prune_index(cache, fts, records, cancelled)
+        return unreadable
+
+    def cached_hits(self, records, needles, cancelled):
+        if not self.cache_path.is_file():
+            return {}, {}
+        ids = {row.id for row in records}
+        with read_only(self.cache_path) as cache:
+            cache.set_progress_handler(cancelled.is_set, 1000)
+            cache.execute("BEGIN")  # All terms must see the same index revision.
+            version = cache.execute("PRAGMA user_version").fetchone()[0]
+            if not version:
+                return {}, {}
+            documents = {row[0]: row[1] for row in cache.execute("SELECT rowid, id FROM documents") if row[1] in ids}
+            body, prompts = {}, {}
+            for needle in set(needles):
+                if len(needle) < 3:
+                    gram = b"\0" + needle.encode("utf-8") + b"\0"
+                    for field, result in (("body", body), ("prompts", prompts)):
+                        result[needle] = {documents[row[0]] for row in cache.execute(
+                            f"SELECT document FROM search_terms WHERE instr({field}, ?)", (gram,)) if row[0] in documents}
+                    continue
+                if version == 1:
+                    phrase = '"' + needle.replace('"', '""') + '"'
+                    try:
+                        for field, result in (("body", body), ("prompts", prompts)):
+                            result[needle] = {documents[row[0]] for row in cache.execute(
+                                "SELECT rowid FROM search_text WHERE search_text MATCH ?", (f"{field}: {phrase}",))
+                                              if row[0] in documents}
+                        continue
+                    except sqlite3.OperationalError as error:
+                        if "no such module" not in str(error) and "no such tokenizer" not in str(error):
+                            raise
+                # Older SQLite builds still search cached text without touching
+                # the Codex databases or reading any rollout files.
+                body[needle], prompts[needle] = set(), set()
+                for row in cache.execute("SELECT rowid, text, prompts FROM documents"):
+                    if cancelled.is_set():
+                        return {}, {}
+                    document, text, prompt = row
+                    if document in documents:
+                        if needle in search_text(text):
+                            body[needle].add(documents[document])
+                        if needle in search_text(prompt):
+                            prompts[needle].add(documents[document])
+            return body, prompts
+
+    def search(self, records, query, accounts, cancelled=None, full_text=True):
         cancelled = cancelled or threading.Event()
         if cancelled.is_set():
             return None
         needles = terms(query)
         if not needles:
-            return records, {}, 0, {}
-        cache = None
-        if full_text:
-            try:
-                self.cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-                path = self.cache_dir / "thread-search.sqlite"
-                descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
-                os.fchmod(descriptor, 0o600)
-                os.close(descriptor)
-                cache = sqlite3.connect(path, timeout=2)
-                cache.execute("CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, text TEXT NOT NULL)")
-                if "prompts" not in {row[1] for row in cache.execute("PRAGMA table_info(documents)")}:
-                    cache.execute("ALTER TABLE documents ADD COLUMN prompts TEXT NOT NULL DEFAULT ''")
-                    cache.commit()
-            except (OSError, sqlite3.Error):
-                if cache:
-                    cache.close()
-                cache = None
-        matches, snippets, unreadable, ranks = [], {}, 0, {}
+            return list(records), {}
         try:
-            for index, thread in enumerate(records):
-                if cancelled.is_set():
-                    return None
-                metadata = thread.metadata_text(account_label(thread, accounts))
+            body, prompts = self.cached_hits(records, needles, cancelled) if full_text else ({}, {})
+        except sqlite3.Error:
+            if cancelled.is_set():
+                return None
+            raise
+        matches, ranks = [], {}
+        for thread in records:
+            metadata = thread.metadata_text(account_label(thread, accounts))
+            if all(needle in metadata or thread.id in body.get(needle, ()) for needle in needles):
+                matches.append(thread)
                 title = thread.title.casefold()
-                body = prompts = ""
-                if full_text and not all(needle in title for needle in needles):
-                    try:
-                        segments = self.history_segments(thread)
-                        fingerprints = []
-                        missing_file = False
-                        for identity, path, ordinal, end in segments:
-                            try:
-                                stat = Path(path).stat() if path else None
-                            except FileNotFoundError:
-                                stat = None
-                            fingerprints.append(f"{identity}:{ordinal}:{end}:{stat.st_mtime_ns if stat else 0}:{stat.st_size if stat else 0}")
-                            missing_file = missing_file or stat is None
-                        fingerprint = "ranked-v2:" + str(thread.updated) + ":" + ";".join(fingerprints)
-                        if missing_file:
-                            for path in (self.home / "thread_history_1.sqlite", self.home / "thread_history_1.sqlite-wal"):
-                                if path.exists():
-                                    fingerprint += f":{path.stat().st_mtime_ns}"
-                        hit = cache.execute("SELECT prompts, text FROM documents WHERE id=? AND fingerprint=?", (thread.id, fingerprint)).fetchone() if cache else None
-                        if hit:
-                            prompts, body = hit
-                        else:
-                            parts = self.content_parts(thread, cancelled, segments)
-                            if parts is None:
-                                return None
-                            prompts, body = parts
-                            if cache:
-                                cache.execute("INSERT OR REPLACE INTO documents (id, fingerprint, text, prompts) VALUES (?,?,?,?)", (thread.id, fingerprint, body, prompts))
-                    except (OSError, sqlite3.Error):
-                        unreadable += 1
-                folded = body.casefold()
-                if all(needle in metadata or needle in folded for needle in needles):
-                    matches.append(thread)
-                    prompt_text = prompts.casefold()
-                    ranks[thread.id] = (-sum(needle in title for needle in needles),
-                                        -sum(needle in prompt_text for needle in needles),
-                                        -sum(needle in folded for needle in needles))
-                    excerpt = prompts if any(needle in prompt_text for needle in needles) else body
-                    position = next((excerpt.casefold().find(needle) for needle in needles if needle in excerpt.casefold()), 0)
-                    snippets[thread.id] = clean(excerpt[max(0, position - 55):position + 160])
-                if (index + 1) % 20 == 0 or index + 1 == len(records):
-                    if cache:
-                        cache.commit()
-                    if progress:
-                        progress(index + 1, len(records))
-            matches.sort(key=lambda row: (ranks[row.id], -row.updated, row.id))
-            return matches, snippets, unreadable, ranks
-        finally:
-            if cache:
-                cache.commit()
-                cache.close()
+                ranks[thread.id] = (-sum(needle in title for needle in needles),
+                                    -sum(thread.id in prompts.get(needle, ()) for needle in needles),
+                                    -sum(thread.id in body.get(needle, ()) for needle in needles))
+        matches.sort(key=lambda row: (ranks[row.id], -row.updated, row.id))
+        return (matches, ranks) if not cancelled.is_set() else None
+
+    def excerpt(self, identity, query, prompt):
+        field = "prompts" if prompt else "text"
+        with read_only(self.cache_path) as cache:
+            row = cache.execute(f"SELECT {field} FROM documents WHERE id=?", (identity,)).fetchone()
+        if row is None:
+            return ""
+        text = row[0]
+        folded = search_text(text)
+        position = next((folded.find(needle) for needle in terms(query) if needle in folded), -1)
+        return clean(text[max(0, position - 55):position + 160]) if position >= 0 else ""
 
 
 @dataclass(frozen=True)

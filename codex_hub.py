@@ -18,13 +18,13 @@ import tempfile
 
 from codex_resets import timestamp
 from hub_accounts import (AccountService, CommandError, Controller, clean, expires_in,
-                          merge_local, registry_snapshot, remaining_percent, reset_count,
+                          merge_local, redeemable_credits, registry_snapshot, remaining_percent, reset_count,
                           short_time, usable_credits)
 from hub_resumer import ResumerView
 from hub_threads import resume_plan
 
 ROOT = Path(__file__).resolve().parent
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 UTC = timezone.utc
 
 
@@ -52,6 +52,9 @@ class HubApp:
         self.error = False
         self.action = False
         self.action_thread = None
+        self.reset_account = None
+        self.reset_choices = []
+        self.reset_choice = 0
         self.daemon = "checking"
         self.daemon_epoch = 0
         self.status_until = 0.0
@@ -63,7 +66,6 @@ class HubApp:
             self.client = renamer.AppServer(args.codex_bin, self.home)
         self.threads = renamer.RenamerApp(self.client, args.limit)
         self.resumer = ResumerView(self.home, renamer, str(getattr(args, "directory", "") or ""))
-        self.resumer_loaded = False
         emit = lambda text: self.messages.put(("progress", text))
         if self.demo:
             from hub_demo import DemoAccountService, DemoController
@@ -99,6 +101,13 @@ class HubApp:
         self.accounts = merge_local(registry_snapshot(self.home), self.accounts)
         self.index = next((i for i, a in enumerate(self.accounts) if a["account_key"] == key),
                           min(self.index, max(0, len(self.accounts) - 1)))
+        # Only login labels affect the cached Threads view.
+        identity = lambda a: (a["account_key"], a.get("alias"), a.get("email"))
+        if list(map(identity, self.accounts)) != list(map(identity, self.resumer.accounts)):
+            if self.resumer.loaded:
+                self.resumer.refresh(self.accounts, reload=False)
+            else:
+                self.resumer.accounts = list(self.accounts)
 
     def refresh(self):
         if self.loading or self.action:
@@ -172,6 +181,46 @@ class HubApp:
             except Exception:
                 self.messages.put(("action", "Operation failed · check Codex-Auth and the daemon", True))
         self.action_thread = threading.Thread(target=work, name="codex-hub-switch")
+        self.action_thread.start()
+
+    def open_reset_picker(self):
+        if self.action:
+            return
+        if self.args.offline:
+            self.status, self.error = "Offline mode · reset redemption needs a connection", True
+            return
+        if not self.accounts:
+            self.status, self.error = "No account selected", True
+            return
+        account = self.accounts[self.index]
+        choices = redeemable_credits(account)
+        if not choices:
+            message = "No saved resets can be redeemed" if account.get("resets_live") else "Refresh reset details with r first"
+            self.status, self.error = message, True
+            return
+        self.reset_account, self.reset_choices, self.reset_choice = dict(account), choices, 0
+
+    def redeem_reset(self, account, credit):
+        if self.action or self.args.offline:
+            return
+        self.action, self.error = True, False
+        self.generation += 1  # Quota reads made before redemption cannot replace the refreshed data.
+        self.loading.clear()
+        self.status = "Redeeming saved reset…"
+        label = clean(account.get("alias") or account.get("email") or "selected account")
+
+        def work():
+            try:
+                self.service.redeem(account, credit["id"])
+                message = f"Reset redeemed for {label}" + (" (demo)" if self.demo else "")
+                failed = False
+            except CommandError as error:
+                message, failed = str(error), True
+            except Exception:
+                message, failed = "Reset outcome unknown · check refreshed balances before retrying", True
+            self.messages.put(("redeem", account["account_key"], credit["id"], message, failed))
+
+        self.action_thread = threading.Thread(target=work, name="accountdeck-redeem")
         self.action_thread.start()
 
     def login(self, device_auth=False):
@@ -253,8 +302,19 @@ class HubApp:
             elif kind == "progress":
                 self.status = message[1]
             elif kind == "daemon":
-                if not self.action and message[2] == self.daemon_epoch:
+                if message[2] == self.daemon_epoch:
                     self.daemon = message[1]
+            elif kind == "redeem":
+                _, key, credit_id, status, error = message
+                self.action = False
+                for account in self.accounts:
+                    if account["account_key"] == key:
+                        account.update(usage_live=False, resets_live=False)
+                        if not error:
+                            account["credits"] = [credit for credit in account.get("credits") or [] if credit.get("id") != credit_id]
+                        break
+                self.refresh()
+                self.status, self.error, self.status_until = status, error, time.monotonic() + 12
             elif kind == "action":
                 self.action = False
                 self.status, self.error = message[1:]
@@ -266,8 +326,6 @@ class HubApp:
                 except (OSError, ValueError, TypeError, KeyError):
                     self.status += " · registry could not be refreshed"
                     self.error = True
-                if self.resumer_loaded:
-                    self.resumer.refresh(self.accounts)
 
     def resume_selected(self):
         if self.action or self.threads.pending or self.resumer.pending:
@@ -385,8 +443,8 @@ class HubApp:
         self.line(2, 33, "← / → / Tab change view", width - 36, self.style("muted"))
         self.line(height - 3, 2, "─" * (width - 4), width - 4, self.style("border"))
         if self.tab == "accounts":
-            keys = ("↑↓ Select   Enter Switch+restart   → Threads   l Login   L Device login   r Refresh   d Restart   q Quit"
-                    if width >= 110 else "↑↓ Select  Enter Switch  → Threads  l Login  r Reload  d Restart  q Quit")
+            keys = ("↑↓ Select   Enter Switch+restart   x Redeem   → Threads   l/L Login   r Refresh   d Restart   q Quit"
+                    if width >= 104 else "↑↓ Select  Enter Switch  x Redeem  → Threads  l Login  r Refresh  q Quit")
         else:
             keys = ("Enter Resume  Ctrl+R Rename  Type Search  F5 Reload  F6 Filters  F7 Columns  F8 Sort  F10 Quit"
                     if width >= 100 else "Enter Resume  Ctrl+R Rename  Type Search  F6 Filters  F7 Columns  F10 Quit")
@@ -395,6 +453,8 @@ class HubApp:
             message, error = self.status, self.error
         else:
             message, error = self.resumer.status, self.resumer.error
+            if self.resumer.index_status and not error:
+                message += " · " + self.resumer.index_status
         if self.tab == "threads" and self.threads.pending:
             message, error = "Saving thread name…", False
         if self.loading or self.action or (self.tab == "threads" and (self.threads.pending or self.resumer.pending)):
@@ -558,6 +618,28 @@ class HubApp:
         window.move(4, 4 + cursor)
         window.noutrefresh()
 
+    def draw_reset_picker(self):
+        height, _ = self.screen.getmaxyx()
+        count = min(height - 2, len(self.reset_choices) + 7)
+        window, columns, put = self.resumer.modal_window(self.screen, count, "Redeem saved reset", self.style)
+        label = clean(self.reset_account.get("alias") or self.reset_account.get("email") or "Selected account")
+        put(window, 2, 2, "Account: " + label, self.style("text"), columns - 5)
+        put(window, 3, 2, "This spends one saved reset immediately.", self.style("amber"), columns - 5)
+        capacity = count - 7
+        start = min(max(0, self.reset_choice - capacity + 1), len(self.reset_choices) - capacity)
+        for i, credit in enumerate(self.reset_choices[start:start + capacity], start):
+            selected = i == self.reset_choice
+            expiry = timestamp(credit.get("expires_at"))
+            expiry_label = expiry.astimezone().strftime("%d %b %H:%M") if expiry else "Unknown expiry"
+            prefix = "› " if selected else "  "
+            title = clean(credit.get("title") or "Saved reset")
+            attr = self.style(self.reset_color(expires_in(credit))) | (curses.A_REVERSE if selected else 0)
+            width = columns - 5
+            text = self.renamer.fit(prefix + title, width - len(expiry_label) - 3)
+            put(window, 4 + i - start, 2, text + "   " + expiry_label, attr, width)
+        put(window, count - 2, 2, "↑↓ Choose · y Redeem selected reset · Esc Cancel", self.style("muted"), columns - 5)
+        window.noutrefresh()
+
     def draw(self):
         self.screen.erase()
         height, width = self.screen.getmaxyx()
@@ -577,7 +659,9 @@ class HubApp:
             if not self.resumer.mode and not self.threads.mode:
                 self.resumer.place_cursor(self.screen)
         self.screen.noutrefresh()
-        if self.tab == "threads" and self.threads.mode:
+        if self.reset_account is not None:
+            self.draw_reset_picker()
+        elif self.tab == "threads" and self.threads.mode:
             self.draw_editor()
         elif self.tab == "threads" and self.resumer.mode:
             self.resumer.draw_modal(self.screen, self.style)
@@ -585,11 +669,22 @@ class HubApp:
 
     def set_tab(self, tab):
         self.tab = tab
-        if tab == "threads" and not self.resumer_loaded:
+        if tab == "threads" and not self.resumer.last_index:
             self.resumer.refresh(self.accounts)
-            self.resumer_loaded = True
 
     def handle_key(self, key):
+        if self.reset_account is not None:
+            if key in ("\x1b", curses.KEY_F10):
+                self.reset_account = None
+            elif key == curses.KEY_UP:
+                self.reset_choice = max(0, self.reset_choice - 1)
+            elif key == curses.KEY_DOWN:
+                self.reset_choice = min(len(self.reset_choices) - 1, self.reset_choice + 1)
+            elif key in ("y", "Y"):
+                account, credit = self.reset_account, self.reset_choices[self.reset_choice]
+                self.reset_account = None
+                self.redeem_reset(account, credit)
+            return True
         if key in (curses.KEY_F1, curses.KEY_F2):
             self.set_tab("accounts" if key == curses.KEY_F1 else "threads")
             return True
@@ -646,6 +741,8 @@ class HubApp:
             self.start_action()
         elif key in ("r", "R"):
             self.refresh()
+        elif key in ("x", "X"):
+            self.open_reset_picker()
         return True
 
     def run(self, screen):
@@ -656,7 +753,7 @@ class HubApp:
         self.init_colors()
         self.refresh()
         self.check_daemon()
-        self.set_tab(self.tab)
+        self.resumer.refresh(self.accounts)
         try:
             while True:
                 self.finish_messages()
@@ -664,7 +761,10 @@ class HubApp:
                 self.resumer.finish_pending()
                 if time.monotonic() - self.last_refresh >= self.args.interval:
                     self.refresh()
+                if not self.resumer.indexing and time.monotonic() - self.resumer.last_index >= self.args.interval:
+                    self.resumer.refresh(self.accounts)
                 self.draw()
+                screen.timeout(25 if self.tab == "threads" and self.resumer.pending else 80)
                 try:
                     key = screen.get_wch()
                 except curses.error:
@@ -700,8 +800,8 @@ def main(argv=None):
     mode.add_argument("--threads", "--resumer", dest="resumer", action="store_true", help="Open the Threads tab: search, resume and Ctrl+R to rename")
     parser.add_argument("--directory", type=Path, help="Threads: filter this directory and its subfolders")
     parser.add_argument("--demo", action="store_true", help="Screenshot/demo mode with disposable fictional accounts and threads; no network or external commands")
-    parser.add_argument("--offline", action="store_true", help="Show saved limits; disable account refresh/switching and daemon restarts")
-    parser.add_argument("--interval", type=int, default=180, help="Refresh interval in seconds (minimum 30)")
+    parser.add_argument("--offline", action="store_true", help="Show saved limits and use the local thread index")
+    parser.add_argument("--interval", type=int, default=180, help="Refresh accounts and the thread index every N seconds (minimum 30)")
     parser.add_argument("--warning-days", type=int, default=7)
     parser.add_argument("--limit", type=int, default=200, help="Legacy option; the Threads tab always loads all local threads")
     parser.add_argument("--version", action="version", version=f"codex-accountdeck {VERSION}")

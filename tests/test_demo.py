@@ -28,9 +28,9 @@ class DemoTests(unittest.TestCase):
             self.assertEqual(len(records), 9)
             self.assertEqual(sum(row.archived for row in records), 1)
             self.assertTrue(any(row.cwd.endswith("luna/door/camera") for row in records))
-            found, _, unreadable, _ = store.search(records, "shutter", accounts)
+            self.assertEqual(store.update_index(records), 0)
+            found, _ = store.search(records, "shutter", accounts)
             self.assertEqual([row.title for row in found], ["Tune thermal camera palettes"])
-            self.assertEqual(unreadable, 0)
             service = DemoAccountService(home)
             credits = [service.fetch(account, "resets")["credits"] for account in accounts]
             self.assertTrue(any(not row for row in credits))

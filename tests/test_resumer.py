@@ -54,7 +54,7 @@ def wait_for_view(view):
     deadline = time.monotonic() + 4
     while time.monotonic() < deadline:
         view.finish_pending()
-        if not view.pending:
+        if not view.pending and not view.indexing:
             return
         time.sleep(.01)
     raise AssertionError("Thread search did not finish")
@@ -101,12 +101,14 @@ class ResumerTests(unittest.TestCase):
 
     def test_search_finds_conversation_only_text_and_unicode_and_phrases(self):
         rows = self.store.load()
-        for query in ("quartz-falcon", "wärmebild strasse", '"Only in the conversation"', "Door quartz-falcon"):
-            matches, snippets, unreadable, _ = self.store.search(rows, query, self.accounts)
-            self.assertEqual([row.id for row in matches], [FIRST], query)
-            self.assertIn("conversation", snippets[FIRST])
-            self.assertEqual(unreadable, 0)
-        matches, _, _, _ = self.store.search(rows, "quartz-falcon", self.accounts, full_text=False)
+        self.assertEqual(self.store.update_index(rows), 0)
+        reopened = ThreadStore(self.home)
+        with patch.object(reopened, "content_parts", side_effect=AssertionError("A search read the transcript")):
+            for query in ("quartz-falcon", "wärmebild strasse", '"Only in the conversation"', "Door quartz-falcon", "ä", "qu"):
+                matches, _ = reopened.search(rows, query, self.accounts)
+                self.assertEqual([row.id for row in matches], [FIRST], query)
+                self.assertIn("conversation", reopened.excerpt(FIRST, query, prompt=False))
+        matches, _ = reopened.search(rows, "quartz-falcon", self.accounts, full_text=False)
         self.assertEqual(matches, [])
         self.assertEqual((self.home / "accountdeck/thread-search.sqlite").stat().st_mode & 0o777, 0o600)
 
@@ -127,14 +129,18 @@ class ResumerTests(unittest.TestCase):
         metadata = SavedThread(id="metadata", title="Metadata only", cwd="/calibration", updated=9999)
         records = [metadata, *reversed(rows)]
         expected = [row.id for row in rows] + [metadata.id]
-        for _ in range(2):  # A warm cache retains the prompt/text distinction.
+        self.store.update_index(records)
+        for _ in range(2):  # Refreshing the index retains cached text and its rank.
             result = self.store.search(records, "calibration", self.accounts)
             self.assertEqual([row.id for row in result[0]], expected)
+            with patch.object(self.store, "content_parts", side_effect=AssertionError("Unchanged transcript reread")):
+                self.store.update_index(records)
         with closing(sqlite3.connect(cache)) as db:
             self.assertIn("CALIBRATION", db.execute("SELECT prompts FROM documents WHERE id='rank-1'").fetchone()[0])
         view = ResumerView(self.home, load_renamer(PROJECT))
         try:
-            view.records, view.visible, view.loaded = records, records, True
+            view.records, view.loaded = records, True
+            view.refresh(self.accounts, reload=False)
             view.sort, view.reverse = "title", False
             for char in "calibration":
                 view.handle_key(char, 5)
@@ -252,16 +258,29 @@ class ResumerTests(unittest.TestCase):
                 (FIRST, 3, json.dumps({"type": "commandExecution", "command": "diagnostic-command", "aggregatedOutput": "tool-output-needle"})),
             ])
         self.rollout.unlink()
+        records = [self.target()]
+        self.assertEqual(self.store.update_index(records), 0)
         for query in ("paginated-user-needle", "paginated-answer-needle", "tool-output-needle"):
-            matches, _, unreadable, _ = self.store.search([self.target()], query, self.accounts)
+            matches, _ = self.store.search(records, query, self.accounts)
             self.assertEqual([row.id for row in matches], [FIRST])
-            self.assertEqual(unreadable, 0)
+        with closing(sqlite3.connect(self.home / "thread_history_1.sqlite")) as db, db:
+            db.execute("INSERT INTO thread_items VALUES (?,?,?)", (
+                FIRST, 4, json.dumps({"type": "agentMessage", "text": "new-paginated-message"})))
+        self.store.update_index(records)
+        self.assertEqual(self.store.search(records, "new-paginated-message", self.accounts)[0], records)
 
     def test_search_cache_invalidates_when_a_new_message_arrives(self):
-        self.assertEqual(len(self.store.search([self.target()], "quartz-falcon", self.accounts)[0]), 1)
+        records = [self.target()]
+        self.store.update_index(records)
+        self.assertEqual(len(self.store.search(records, "quartz-falcon", self.accounts)[0]), 1)
         with self.rollout.open("a") as stream:
             stream.write(json.dumps({"type": "event_msg", "payload": {"type": "user_message", "message": "brand-new-needle"}}) + "\n")
-        self.assertEqual(len(self.store.search([self.target()], "brand-new-needle", self.accounts)[0]), 1)
+        self.store.update_index(records)
+        self.assertEqual(len(self.store.search(records, "brand-new-needle", self.accounts)[0]), 1)
+        self.rollout.write_text(self.rollout.read_text().replace("brand-new-needle", "replacement"))
+        self.store.update_index(records)
+        self.assertEqual(self.store.search(records, "brand-new-needle", self.accounts)[0], [])
+        self.assertEqual(len(self.store.search(records, "replacement", self.accounts)[0]), 1)
 
     def test_fork_search_includes_inherited_prefix_but_not_later_parent_messages(self):
         target = self.target()
@@ -273,6 +292,7 @@ class ResumerTests(unittest.TestCase):
             "thread_id": FIRST, "end_ordinal_exclusive": 2, "end_byte_offset": end}}}) + "\n" +
             json.dumps({"type": "event_msg", "payload": {"type": "user_message", "message": "fork-own-message"}}) + "\n")
         record = replace(target, id=SECOND, title="Fork", path=str(fork))
+        self.store.update_index([record])
         for query in ("quartz-falcon", "fork-own-message"):
             self.assertEqual([row.id for row in self.store.search([record], query, self.accounts)[0]], [SECOND])
         self.assertEqual(self.store.search([record], "after-fork-must-not-match", self.accounts)[0], [])
@@ -285,6 +305,7 @@ class ResumerTests(unittest.TestCase):
             db.execute("INSERT INTO thread_items VALUES (?,?,?)", (SECOND, 1,
                        json.dumps({"type": "agentMessage", "text": "reverted-history-needle"})))
         record = replace(self.target(), path=str(path))
+        self.store.update_index([record])
         self.assertEqual([row.id for row in self.store.search([record], "reverted-history-needle", self.accounts)[0]], [FIRST])
 
     def test_search_cancellation_does_not_publish_an_incomplete_result(self):
