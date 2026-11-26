@@ -15,11 +15,11 @@ Switch accounts, watch your quotas, catch expiring resets, and find, rename or r
 
 **Accounts · quotas and saved resets**
 
-![Accounts tab with quota bars, colored reset expiries, and the Redeem shortcut](docs/screenshots/accounts.png)
+![Accounts tab with quota bars, colored reset expiries, and the Redeem shortcut](docs/screenshots/accounts-redeem.png)
 
 **Threads · search across local projects**
 
-![Threads tab filtered by the word local, with two matches and a matching prompt excerpt](docs/screenshots/threads.png)
+![Threads tab filtered by the word local, with two matches and a matching prompt excerpt](docs/screenshots/threads-live-search.png)
 
 Both views use fictional accounts and conversations from the interactive demo.
 

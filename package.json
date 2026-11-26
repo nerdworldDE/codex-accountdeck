@@ -27,8 +27,8 @@
     "codex_resets.py",
     "codex_renamer.py",
     "codex_colors.py",
-    "docs/screenshots/accounts.png",
-    "docs/screenshots/threads.png",
+    "docs/screenshots/accounts-redeem.png",
+    "docs/screenshots/threads-live-search.png",
     "docs/screenshots/updates.png"
   ],
   "publishConfig": {
