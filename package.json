@@ -23,11 +23,13 @@
     "hub_threads.py",
     "hub_resumer.py",
     "hub_demo.py",
+    "hub_updates.py",
     "codex_resets.py",
     "codex_renamer.py",
     "codex_colors.py",
     "docs/screenshots/accounts.png",
-    "docs/screenshots/threads.png"
+    "docs/screenshots/threads.png",
+    "docs/screenshots/updates.png"
   ],
   "publishConfig": {
     "access": "public"

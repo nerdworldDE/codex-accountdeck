@@ -100,7 +100,8 @@ class ResumerTests(unittest.TestCase):
             view.close()
 
     def test_search_finds_conversation_only_text_and_unicode_and_phrases(self):
-        rows = self.store.load()
+        # Randomized fixture paths can also contain short queries like "qu".
+        rows = [replace(row, cwd="") for row in self.store.load()]
         self.assertEqual(self.store.update_index(rows), 0)
         reopened = ThreadStore(self.home)
         with patch.object(reopened, "content_parts", side_effect=AssertionError("A search read the transcript")):

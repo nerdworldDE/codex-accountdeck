@@ -43,11 +43,11 @@ npm pack
 npm install --global ./codex-accountdeck-1.4.0.tgz
 ```
 
-The npm package uses an explicit file allowlist: the launcher, the eight Python modules, the two README screenshots, and npm's standard metadata/readme/license files. It does not include tests, local settings, credentials, or caches. Installing from GitHub does not require npm publisher credentials. Publishing to the npm registry is a separate maintainer action (`npm login`, then `npm publish`).
+The npm package uses an explicit file allowlist: the launcher, the nine Python modules, the README screenshots, and npm's standard metadata/readme/license files. It does not include tests, local settings, credentials, or caches. Installing from GitHub does not require npm publisher credentials. Publishing to the npm registry is a separate maintainer action (`npm login`, then `npm publish`).
 
 Homebrew is distributed through [nerdworldDE/homebrew-tap](https://github.com/nerdworldDE/homebrew-tap). Its formula pins a release archive and SHA-256 checksum and declares the Python dependency. Future releases need an updated formula URL, version, and checksum.
 
-For a release, update the Python and npm versions together, build the source archive, wheel and npm tarball from the tested commit, and attach all three plus `SHA256SUMS` to the matching GitHub tag. Publish those assets before updating the Homebrew formula. The formula must install all eight runtime modules, including `hub_threads.py`, `hub_resumer.py` and `hub_demo.py`; verify the installed `--threads` and `--demo` options as well as the version.
+For a release, update the Python and npm versions together, build the source archive, wheel and npm tarball from the tested commit, and attach all three plus `SHA256SUMS` to the matching GitHub tag. Publish those assets before updating the Homebrew formula. The formula must install all nine runtime modules, including `hub_updates.py`. Verify the installed `--threads`, `--demo` and `--check-update` options as well as the version.
 
 ## Screenshots
 
@@ -56,7 +56,7 @@ For a release, update the Python and npm versions together, build the source arc
 ./codex-accountdeck --demo --threads
 ```
 
-The README uses actual terminal captures in `docs/screenshots/accounts.png` and `docs/screenshots/threads.png`. To refresh them, start demo mode and capture the Accounts and Threads tabs. Keep the DEMO badge visible and use fictional data. The former SVG illustration and its generator have been removed.
+The README uses terminal captures in `docs/screenshots/`. Capture Accounts and Threads in demo mode with the DEMO badge visible. The Updates capture uses the same fictional environment and a simulated release response.
 
 ## Source map
 
@@ -66,6 +66,7 @@ The README uses actual terminal captures in `docs/screenshots/accounts.png` and 
 | `hub_threads.py` | Local thread discovery, persistent search index, relevance ranking and resume planning |
 | `hub_resumer.py` | Combined Threads table, live search worker, filter panel, columns and sorting |
 | `hub_demo.py` | Disposable fictional accounts/transcripts and simulated actions for `--demo` |
+| `hub_updates.py` | Cached GitHub release checks and explicit package manager updates |
 | `hub_accounts.py` | Account snapshots, usage requests, saved reset redemption, login/switch/daemon commands |
 | `codex_renamer.py`, `codex_colors.py` | Bundled thread management and colors |
 | `codex_resets.py` | Shared reset parsing and original optional reset utilities |

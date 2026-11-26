@@ -23,7 +23,10 @@ import sys
 from hub_accounts import AccountService
 from test_hub import live_fetch
 from codex_hub import main
+from hub_updates import ReleaseCheck
 AccountService.fetch = live_fetch
+release_versions = iter(("9.0.0", "9.0.1"))
+ReleaseCheck.fetch = staticmethod(lambda: next(release_versions, "9.0.1"))
 raise SystemExit(main(sys.argv[1:]))
 """
 
@@ -63,6 +66,14 @@ class TerminalJourneyTests(unittest.TestCase):
             try:
                 wait_until(lambda: b"account-4@example.org" in transcript and b"SAVED RESETS" in transcript)
                 self.assertNotIn(b"Traceback", transcript)
+                wait_until(lambda: b"v9.0.0" in transcript)
+                os.write(master, b"\x1bOR")  # F3: Updates
+                wait_until(lambda: b"AccountDeck updates" in transcript and b"codex-accountdeck --update" in transcript)
+                os.write(master, b"\x1b[15~")  # F5: check again, even with a fresh cache
+                # Curses may redraw only the changed digit of the version.
+                cache = home / "accountdeck/update-check.json"
+                wait_until(lambda: json.loads(cache.read_text())["latest"] == "9.0.1")
+                os.write(master, b"\x1bOR")  # F3: close the dialog
                 os.write(master, b"\x1bOC")  # right: Threads
                 wait_until(lambda: b"Original thread 0" in transcript)
                 os.write(master, b"\x12")  # Ctrl+R

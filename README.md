@@ -13,15 +13,15 @@ Switch accounts, watch your quotas, catch expiring resets, and find, rename or r
 
 </div>
 
-**Accounts — quotas, reset expiry and switching**
+**Accounts · quotas and saved resets**
 
-![Codex AccountDeck Accounts tab with four fictional demo accounts, quota bars and reset expiry](docs/screenshots/accounts.png)
+![Accounts tab with quota bars, colored reset expiries, and the Redeem shortcut](docs/screenshots/accounts.png)
 
-**Threads — search, rename and resume across local projects**
+**Threads · search across local projects**
 
-![Codex AccountDeck Threads tab with live search, colored conversations and project directories](docs/screenshots/threads.png)
+![Threads tab filtered by the word local, with two matches and a matching prompt excerpt](docs/screenshots/threads.png)
 
-Both screenshots show the running TUI in demo mode with fictional data.
+Both views use fictional accounts and conversations from the interactive demo.
 
 ## ✨ Your accounts at a glance
 
@@ -59,7 +59,7 @@ Homebrew installs a compatible Python automatically. You still need Codex CLI an
 ### npm · directly from GitHub
 
 ```bash
-npm install -g git+https://github.com/nerdworldDE/codex-accountdeck.git
+npm install -g --allow-git=root git+https://github.com/nerdworldDE/codex-accountdeck.git
 codex-accountdeck
 ```
 
@@ -112,6 +112,7 @@ Demo mode always uses a fresh temporary data directory, even when `CODEX_HOME` o
 | Key | Accounts · F1 | Threads · F2 |
 | :--- | :--- | :--- |
 | **F1 / F2** | Open Accounts | Open Threads |
+| **F3** | Show available updates | Show available updates |
 | **← / → / Tab** | Switch tabs | Switch tabs |
 | **↑ / ↓, PgUp / PgDn** | Select account | Select thread |
 | **Enter** | Switch account + restart daemon | Resume selected thread |
@@ -151,6 +152,21 @@ The original login does not need to be saved. If the project directory no longer
 
 🟢 More than 7 days left · 🟠 Within 7 days · 🔴 Within 1 day
 
+## ⬆️ Updates
+
+AccountDeck checks for a stable GitHub release in the background at startup. The result is cached for 24 hours. **F3** shows the installed and latest versions, and **F5** inside that dialog checks again. Use `--no-update-check` to skip automatic checks. Offline and demo modes skip version checks entirely.
+
+![Update dialog with the installed version, a simulated newer release, and the update command](docs/screenshots/updates.png)
+
+*Example with a simulated release check.*
+
+```bash
+codex-accountdeck --check-update
+codex-accountdeck --update
+```
+
+`--update` delegates installation to Homebrew, global npm, pip in an ordinary virtual environment, or Git for a clean checkout on `main` from the official repository. Git updates to the published release tag. For pipx and uv tool installations, the command prints the corresponding installer command. Relaunch AccountDeck after installing.
+
 ## ⚙️ A few useful options
 
 ```bash
@@ -170,7 +186,7 @@ Optional source-checkout shortcuts: `python3 install_hub.py --shortcuts` adds `s
 
 AccountDeck reads your local Codex-Auth account registry. Usage and confirmed reset requests send the selected account's access token directly to ChatGPT. Redirects are blocked. Account switching and login are delegated to Codex-Auth. Thread renaming uses local metadata, with a local app-server fallback.
 
-**No model calls, telemetry, or token logging.** Redeeming a reset requires confirmation in Accounts. `CACHED` and `NEEDS ATTENTION` distinguish saved values and failed refreshes from live data. ChatGPT's usage/reset endpoints are internal and can change.
+**No model calls, telemetry, or token logging.** The version check queries the public GitHub release metadata without account data or credentials. Redeeming a reset requires confirmation in Accounts. `CACHED` and `NEEDS ATTENTION` distinguish saved values and failed refreshes from live data. ChatGPT's usage/reset endpoints are internal and can change.
 
 ## 🛠️ Development
 

@@ -29,7 +29,7 @@ Repository = "https://github.com/nerdworldDE/codex-accountdeck"
 Issues = "https://github.com/nerdworldDE/codex-accountdeck/issues"
 
 [tool.setuptools]
-py-modules = ["codex_hub", "hub_accounts", "hub_threads", "hub_resumer", "hub_demo", "codex_resets", "codex_renamer", "codex_colors"]
+py-modules = ["codex_hub", "hub_accounts", "hub_threads", "hub_resumer", "hub_demo", "hub_updates", "codex_resets", "codex_renamer", "codex_colors"]
 
 [tool.setuptools.dynamic]
 version = {attr = "codex_hub.VERSION"}

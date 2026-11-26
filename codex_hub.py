@@ -22,6 +22,7 @@ from hub_accounts import (AccountService, CommandError, Controller, clean, expir
                           short_time, usable_credits)
 from hub_resumer import ResumerView
 from hub_threads import resume_plan
+from hub_updates import ReleaseCheck, UpdateError, UpdateStatus, apply_update, release_page
 
 ROOT = Path(__file__).resolve().parent
 VERSION = "1.4.0"
@@ -59,6 +60,9 @@ class HubApp:
         self.daemon_epoch = 0
         self.status_until = 0.0
         self.closing = threading.Event()
+        self.release_check = ReleaseCheck(self.home)
+        self.update_status = UpdateStatus()
+        self.update_checking = self.updates_open = False
         if self.demo:
             from hub_demo import demo_client
             self.client = demo_client(renamer, args.codex_bin, self.home)
@@ -150,6 +154,20 @@ class HubApp:
             if not self.closing.is_set():
                 self.messages.put(("daemon", state, epoch))
         threading.Thread(target=work, daemon=True, name="codex-hub-status").start()
+
+    def check_updates(self, force=False):
+        if self.update_checking or self.demo or self.args.offline:
+            return
+        if not force and getattr(self.args, "no_update_check", False):
+            return
+        self.update_checking = True
+
+        def work():
+            result = self.release_check.check(force=force)
+            if not self.closing.is_set():
+                self.messages.put(("update_check", result))
+
+        threading.Thread(target=work, daemon=True, name="accountdeck-update-check").start()
 
     def start_action(self, account=None, after_login=False):
         if self.action:
@@ -304,6 +322,9 @@ class HubApp:
             elif kind == "daemon":
                 if message[2] == self.daemon_epoch:
                     self.daemon = message[1]
+            elif kind == "update_check":
+                self.update_checking = False
+                self.update_status = message[1]
             elif kind == "redeem":
                 _, key, credit_id, status, error = message
                 self.action = False
@@ -431,7 +452,11 @@ class HubApp:
     def draw_chrome(self):
         height, width = self.screen.getmaxyx()
         self.line(0, 2, "◈ CODEX ACCOUNTDECK", 21, self.style("accent") | curses.A_BOLD)
-        self.line(0, 25, "DEMO · FICTIONAL DATA" if self.demo else "YOUR ACCOUNTS. ONE TERMINAL.", max(0, width - 55), self.style("muted"))
+        has_update = self.update_status.available(VERSION)
+        tagline = "DEMO · FICTIONAL DATA" if self.demo else "YOUR ACCOUNTS. ONE TERMINAL."
+        if has_update:
+            tagline = f"↑ v{self.update_status.latest} · F3"
+        self.line(0, 25, tagline, max(0, width - 55), self.style("amber" if has_update else "muted"))
         state = "DEMO · simulated" if self.demo else "● Server online" if self.daemon == "running" else "○ Server " + self.daemon
         self.line(0, max(18, width - len(state) - 3), state, len(state),
                   self.style("green" if self.daemon == "running" else "muted"))
@@ -440,7 +465,7 @@ class HubApp:
             if self.tab == tab:
                 attr |= curses.A_REVERSE
             self.line(2, x, label, len(label), attr)
-        self.line(2, 33, "← / → / Tab change view", width - 36, self.style("muted"))
+        self.line(2, 33, "F3 Updates   ←/→/Tab change view", width - 36, self.style("muted"))
         self.line(height - 3, 2, "─" * (width - 4), width - 4, self.style("border"))
         if self.tab == "accounts":
             keys = ("↑↓ Select   Enter Switch+restart   x Redeem   → Threads   l/L Login   r Refresh   d Restart   q Quit"
@@ -640,6 +665,35 @@ class HubApp:
         put(window, count - 2, 2, "↑↓ Choose · y Redeem selected reset · Esc Cancel", self.style("muted"), columns - 5)
         window.noutrefresh()
 
+    def draw_updates(self):
+        window, columns, put = self.resumer.modal_window(self.screen, 13, "AccountDeck updates", self.style)
+        status = self.update_status
+        available = status.available(VERSION)
+        allowed = not (self.demo or self.args.offline)
+        put(window, 3, 2, f"Installed      v{VERSION}", self.style("text"), columns - 5)
+        if status.latest is not None:
+            label = "Latest known" if status.failed else "Latest stable"
+            put(window, 4, 2, f"{label:<15}v{status.latest}", self.style("amber" if available else "text"), columns - 5)
+        if not allowed:
+            message = "Version checks unavailable in " + ("demo mode" if self.demo else "offline mode")
+        elif self.update_checking:
+            message = "Checking GitHub…"
+        elif status.failed:
+            message = "Could not check GitHub · F5 retries"
+        elif available:
+            message = "Update available · run from your shell"
+        elif status.latest is not None:
+            message = "AccountDeck is up to date"
+        else:
+            message = "Press F5 to check for a new release"
+        put(window, 6, 2, message, self.style("amber" if available or status.failed else "muted"), columns - 5)
+        if available:
+            put(window, 7, 2, "codex-accountdeck --update", self.style("accent"), columns - 5)
+        put(window, 9, 2, release_page(status.latest), self.style("muted"), columns - 5)
+        keys = "F5 Check now · F3 / Esc Close" if allowed else "F3 / Esc Close"
+        put(window, 11, 2, keys, self.style("muted"), columns - 5)
+        window.noutrefresh()
+
     def draw(self):
         self.screen.erase()
         height, width = self.screen.getmaxyx()
@@ -650,7 +704,7 @@ class HubApp:
             self.screen.refresh()
             return
         editing = self.tab == "threads" and (self.threads.mode or not self.resumer.mode or self.resumer.mode == "directory")
-        self.threads.set_cursor(int(bool(editing)))
+        self.threads.set_cursor(int(bool(editing) and not self.updates_open))
         self.draw_chrome()
         if self.tab == "accounts":
             self.draw_accounts()
@@ -659,7 +713,9 @@ class HubApp:
             if not self.resumer.mode and not self.threads.mode:
                 self.resumer.place_cursor(self.screen)
         self.screen.noutrefresh()
-        if self.reset_account is not None:
+        if self.updates_open:
+            self.draw_updates()
+        elif self.reset_account is not None:
             self.draw_reset_picker()
         elif self.tab == "threads" and self.threads.mode:
             self.draw_editor()
@@ -673,6 +729,12 @@ class HubApp:
             self.resumer.refresh(self.accounts)
 
     def handle_key(self, key):
+        if self.updates_open:
+            if key in ("\x1b", curses.KEY_F3, curses.KEY_F10):
+                self.updates_open = False
+            elif key == curses.KEY_F5:
+                self.check_updates(force=True)
+            return True
         if self.reset_account is not None:
             if key in ("\x1b", curses.KEY_F10):
                 self.reset_account = None
@@ -697,6 +759,9 @@ class HubApp:
             return self.threads.handle_key(key, 1)
         if self.tab == "threads" and self.resumer.mode:
             self.resumer.handle_key(key, 1)
+            return True
+        if key == curses.KEY_F3:
+            self.updates_open = True
             return True
         if key in (curses.KEY_LEFT, curses.KEY_RIGHT, "\t"):
             self.set_tab("threads" if self.tab == "accounts" else "accounts")
@@ -754,6 +819,7 @@ class HubApp:
         self.refresh()
         self.check_daemon()
         self.resumer.refresh(self.accounts)
+        self.check_updates()
         try:
             while True:
                 self.finish_messages()
@@ -798,9 +864,12 @@ def main(argv=None):
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--renamer", action="store_true", help="Open the Threads tab (alias for --threads)")
     mode.add_argument("--threads", "--resumer", dest="resumer", action="store_true", help="Open the Threads tab: search, resume and Ctrl+R to rename")
+    mode.add_argument("--check-update", action="store_true", help="Check the latest stable release and print the result")
+    mode.add_argument("--update", action="store_true", help="Install the latest stable release through your installer")
     parser.add_argument("--directory", type=Path, help="Threads: filter this directory and its subfolders")
     parser.add_argument("--demo", action="store_true", help="Screenshot/demo mode with disposable fictional accounts and threads; no network or external commands")
     parser.add_argument("--offline", action="store_true", help="Show saved limits and use the local thread index")
+    parser.add_argument("--no-update-check", action="store_true", help="Skip the automatic version check")
     parser.add_argument("--interval", type=int, default=180, help="Refresh accounts and the thread index every N seconds (minimum 30)")
     parser.add_argument("--warning-days", type=int, default=7)
     parser.add_argument("--limit", type=int, default=200, help="Legacy option; the Threads tab always loads all local threads")
@@ -808,6 +877,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.interval < 30 or args.warning_days < 1 or args.limit < 1:
         parser.error("interval must be >=30, warning-days and limit must be positive")
+    if args.check_update or args.update:
+        if args.demo or args.offline:
+            parser.error("Update commands require a network connection and are unavailable in demo or offline mode")
+        return update_from_terminal(args)
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         parser.error("Open Codex AccountDeck in an interactive terminal")
     app, demo_directory = None, None
@@ -837,6 +910,26 @@ def main(argv=None):
             os.chdir(original_directory)
             demo_directory.cleanup()
     return 0
+
+
+def update_from_terminal(args):
+    try:
+        status = ReleaseCheck(args.codex_home.expanduser()).check(force=True)
+        if status.failed:
+            raise UpdateError("Could not check GitHub. Try again later.")
+        print(f"Installed v{VERSION} · latest stable v{status.latest}", flush=True)
+        if not status.available(VERSION):
+            print("AccountDeck is up to date.")
+        elif args.update:
+            apply_update(ROOT, status.latest)
+        else:
+            print(f"Update available. Run codex-accountdeck --update or see {release_page(status.latest)}")
+        return 0
+    except UpdateError as error:
+        print(f"Codex AccountDeck: {error}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
 
 
 if __name__ == "__main__":
